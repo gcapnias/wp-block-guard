@@ -1,0 +1,36 @@
+{
+  "name": "wp-block-guard",
+  "version": "0.1.0",
+  "description": "Pre-publish validator for WordPress Gutenberg block markup (.html files, .php fragments) designed for AI coding agents. Wraps block-runner's headless-Gutenberg save()-diff check with a PHP-fragment flagging layer and a zero-dependency structural delimiter pre-check.",
+  "type": "module",
+  "bin": {
+    "wp-block-guard": "./bin/wp-block-guard.js"
+  },
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "keywords": [
+    "wordpress",
+    "gutenberg",
+    "block-markup",
+    "validator",
+    "cli",
+    "ai-agent"
+  ],
+  "scripts": {
+    "start": "node bin/wp-block-guard.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "block-runner": "^0.8.0",
+    "fast-glob": "^3.3.3"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.11"
+  }
+}
