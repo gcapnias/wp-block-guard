@@ -11,8 +11,10 @@ const MARKUP_FILE_RE = /\.(html?|php)$/i;
 /**
  * fast-glob treats `\` as a glob-escape character, not a path separator, so
  * Windows-style backslash patterns (e.g. `.\tests\foo.html`) get mangled and
- * never match. On Windows, normalize `\` to `/` in each pattern before
- * handing it to fast-glob. On every other platform, leave patterns
+ * never match. On Windows, convert each pattern with fast-glob's own
+ * `convertPathToPattern()` helper before handing it to fast-glob — it
+ * normalizes `\` to `/` and escapes glob-special characters, which a bare
+ * string replace would miss. On every other platform, leave patterns
  * untouched — `\` is a legal filename/glob-escape character there.
  *
  * @param {string[]} patterns raw CLI argv patterns
@@ -21,7 +23,7 @@ const MARKUP_FILE_RE = /\.(html?|php)$/i;
  */
 export function normalizePatternsForPlatform(patterns, platform = process.platform) {
   if (platform !== 'win32') return patterns;
-  return patterns.map((p) => p.split('\\').join('/'));
+  return patterns.map((p) => fg.convertPathToPattern(p));
 }
 
 /**
