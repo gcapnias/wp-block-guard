@@ -13,10 +13,17 @@ implemented in its own module and each able to short-circuit the layers after it
 _Avoid_: Stage, phase, step.
 
 **Finding**:
-A single reportable result of validation: `{code, severity, message, fix}`. Every
+A single reportable result of validation: `{code, severity, message, search, fix}`. Every
 layer emits findings; they are the only thing the CLI's JSON output and human report
 are built from.
 _Avoid_: Error (too narrow — a finding may be info/warning/error), issue, diagnostic.
+
+**search**:
+The byte-exact slice of the input file a finding points at — the text an agent would
+look for in order to replace it. Absent (`null`) whenever the tool cannot identify that
+text with certainty.
+_Avoid_: Source (collides with block-runner's own `source` position object), snippet,
+excerpt, offending text.
 
 **Code**:
 The stable, namespaced identifier of a finding's kind (e.g. `STRUCTURAL_UNBALANCED_DELIMITER`),
@@ -66,3 +73,11 @@ the literal cause of the editor's "invalid content" failure this tool exists to
 prevent.
 _Avoid_: Validation (too broad — save() diff is specifically what block-runner does,
 distinct from Layer 0/1 checks).
+
+**Canonicalization**:
+The rewrite of block markup into the exact form a block's `save()` function would
+render — what `--fix` requests. Whole-document and best-effort: it also reformats blocks
+that were already valid, and cannot repair markup carrying anything `save()` would never
+emit.
+_Avoid_: Fix (ambiguous — a finding's `fix` field is advisory prose written for a human,
+not this operation), autofix, repair.
