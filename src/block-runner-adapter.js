@@ -27,26 +27,63 @@
 import { validate, canonicalize } from 'block-runner';
 
 /**
+ * Run `fn` with block-runner's own stderr output captured rather than left to
+ * land on this process's stderr.
+ *
+ * Calling block-runner in-process removed the subprocess pipe that used to
+ * swallow this. It matters only for `canonicalize()`, which writes ~14KB of
+ * jsdom/React block-definition dump per invalid block; `validate()` writes
+ * nothing. Measured, not assumed — and every byte routes through
+ * `process.stderr.write`, which is why patching it is sufficient.
+ *
+ * This patches a global, which is safe here only because `src/pipeline.js`
+ * awaits one file at a time, so exactly one block-runner call is ever in
+ * flight. Revisit if file processing ever becomes concurrent.
+ *
+ * @template T
+ * @param {() => Promise<T>} fn
+ * @returns {Promise<{ ok: true, value: T, captured: string } | { ok: false, error: Error, captured: string }>}
+ */
+async function captureStderr(fn) {
+  const chunks = [];
+  const realWrite = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (chunk) => {
+    chunks.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'));
+    return true;
+  };
+  try {
+    return { ok: true, value: await fn(), captured: chunks.join('') };
+  } catch (err) {
+    return { ok: false, error: err, captured: chunks.join('') };
+  } finally {
+    process.stderr.write = realWrite;
+  }
+}
+
+/**
  * Validate a markup string against headless Gutenberg via block-runner.
  * @param {string} markup
  * @returns {Promise<{ ok: boolean, exitCode: number|null, data: object|null, error: string|null, stderr: string }>}
  */
 export async function validateMarkup(markup) {
-  try {
-    const report = await validate(markup);
-    // block-runner's CLI exit codes: 0 clean, 1 findings present. The
-    // library call has no real process exit code, so synthesize the
-    // equivalent from `report.ok` for anything that still inspects it.
-    return { ok: true, exitCode: report.ok ? 0 : 1, data: report, error: null, stderr: '' };
-  } catch (err) {
+  const run = await captureStderr(() => validate(markup));
+  if (!run.ok) {
+    // Captured output is returned on `stderr` rather than discarded: a thrown
+    // validate is exactly the case where block-runner's own output is the only
+    // explanation of what went wrong.
     return {
       ok: false,
       exitCode: null,
       data: null,
-      error: `block-runner validation failed: ${err.message}`,
-      stderr: '',
+      error: `block-runner validation failed: ${run.error.message}`,
+      stderr: run.captured,
     };
   }
+  const report = run.value;
+  // block-runner's CLI exit codes: 0 clean, 1 findings present. The
+  // library call has no real process exit code, so synthesize the
+  // equivalent from `report.ok` for anything that still inspects it.
+  return { ok: true, exitCode: report.ok ? 0 : 1, data: report, error: null, stderr: '' };
 }
 
 /**
@@ -56,15 +93,20 @@ export async function validateMarkup(markup) {
  * @returns {Promise<string|null>} the fixed markup, or null on failure
  */
 export async function fixMarkup(markup) {
-  try {
-    // Confirmed empirically (node .scratch probe against
-    // tests/fixtures/wp-block-guard/invalid-heading-missing-class.html):
-    // the fixed markup string is exposed on `report.output`, not
-    // `report.markup`/`report.result`.
-    const report = await canonicalize(markup);
-    if (!report || typeof report.output !== 'string') return null;
-    return report.output;
-  } catch {
+  const run = await captureStderr(() => canonicalize(markup));
+  if (!run.ok) {
+    // This function's contract is `string | null`, so there is no field to
+    // hand the captured output back on. Write it through to the real stderr
+    // instead of dropping it — a thrown canonicalize is precisely when it
+    // explains the failure.
+    if (run.captured) process.stderr.write(run.captured);
     return null;
   }
+  // Confirmed empirically (node .scratch probe against
+  // tests/fixtures/wp-block-guard/invalid-heading-missing-class.html):
+  // the fixed markup string is exposed on `report.output`, not
+  // `report.markup`/`report.result`.
+  const report = run.value;
+  if (!report || typeof report.output !== 'string') return null;
+  return report.output;
 }

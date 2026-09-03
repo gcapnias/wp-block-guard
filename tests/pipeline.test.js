@@ -2,6 +2,7 @@ import { describe, it, expect, afterAll } from 'vitest';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import os from 'node:os';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { validateFile } from '../src/index.js';
 
@@ -188,4 +189,41 @@ describe('validateFile — --fix', () => {
     const unchanged = await fs.readFile(tmpFile, 'utf8');
     expect(unchanged).toBe(original);
   });
+});
+
+describe('block-runner stderr containment', () => {
+  const tmpFiles = [];
+  afterAll(async () => {
+    for (const f of tmpFiles) await fs.rm(f, { force: true }).catch(() => {});
+  });
+
+  // Regression test for the in-process adapter: block-runner's canonicalize()
+  // writes ~14KB of jsdom/React block-definition dump per invalid block. The
+  // old subprocess pipe discarded that; calling it in-process puts it on our
+  // own stderr unless captureStderr() intercepts it.
+  //
+  // Deliberately spawned as a child process. Asserting on the adapter's return
+  // value would only prove the plumbing: the leak lands on the real stderr
+  // stream, which vitest's own reporter owns, so it cannot be observed from
+  // inside the test process.
+  // The fixture must be a block canonicalize CANNOT repair: a repairable
+  // near-miss produces no dump, so the test would pass whether or not the
+  // capture works. Measured on this fixture: 14393 bytes without it, 0 with.
+  it('does not leak block-runner output to stderr on a --fix run', async () => {
+    const tmpFile = path.join(os.tmpdir(), `wp-block-guard-stderr-${Date.now()}.html`);
+    tmpFiles.push(tmpFile);
+    await fs.writeFile(tmpFile, await fs.readFile(fx('unfixable-extra-attribute.html'), 'utf8'), 'utf8');
+
+    const cli = path.join(__dirname, '..', 'bin', 'wp-block-guard.js');
+    const { stderr } = await new Promise((resolve) => {
+      const child = spawn(process.execPath, [cli, tmpFile, '--fix', '--json'], { stdio: ['ignore', 'pipe', 'pipe'] });
+      let out = '';
+      let err = '';
+      child.stdout.on('data', (d) => (out += d));
+      child.stderr.on('data', (d) => (err += d));
+      child.on('close', () => resolve({ stdout: out, stderr: err }));
+    });
+
+    expect(stderr).toBe('');
+  }, 45000);
 });
