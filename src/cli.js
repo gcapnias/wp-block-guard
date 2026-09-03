@@ -9,6 +9,22 @@ const require = createRequire(import.meta.url);
 const MARKUP_FILE_RE = /\.(html?|php)$/i;
 
 /**
+ * fast-glob treats `\` as a glob-escape character, not a path separator, so
+ * Windows-style backslash patterns (e.g. `.\tests\foo.html`) get mangled and
+ * never match. On Windows, normalize `\` to `/` in each pattern before
+ * handing it to fast-glob. On every other platform, leave patterns
+ * untouched — `\` is a legal filename/glob-escape character there.
+ *
+ * @param {string[]} patterns raw CLI argv patterns
+ * @param {string} [platform] injectable for testing; defaults to process.platform
+ * @returns {string[]}
+ */
+export function normalizePatternsForPlatform(patterns, platform = process.platform) {
+  if (platform !== 'win32') return patterns;
+  return patterns.map((p) => p.split('\\').join('/'));
+}
+
+/**
  * @param {string[]} argv arguments, excluding the node/script entries
  * @returns {Promise<number>} the process exit code
  */
@@ -63,7 +79,7 @@ export async function main(argv) {
 
   let files;
   try {
-    files = await fg(patterns, { onlyFiles: true, dot: false, unique: true });
+    files = await fg(normalizePatternsForPlatform(patterns), { onlyFiles: true, dot: false, unique: true });
   } catch (err) {
     process.stderr.write(`Error resolving file patterns: ${err.message}\n`);
     return 2;
