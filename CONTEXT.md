@@ -1,0 +1,68 @@
+# wp-block-guard
+
+A pre-publish validator for WordPress Gutenberg block markup. It exists to catch the
+editor's "unexpected or invalid content" failure (and the silent content loss "Attempt
+Block Recovery" can cause) before an AI agent writes generated markup into a WordPress
+post, by running a three-layer check ahead of publish time.
+
+## Language
+
+**Layer**:
+One of the three ordered stages of the validation pipeline (Layer 0, 1, 2), each
+implemented in its own module and each able to short-circuit the layers after it.
+_Avoid_: Stage, phase, step.
+
+**Finding**:
+A single reportable result of validation: `{code, severity, message, fix}`. Every
+layer emits findings; they are the only thing the CLI's JSON output and human report
+are built from.
+_Avoid_: Error (too narrow — a finding may be info/warning/error), issue, diagnostic.
+
+**Code**:
+The stable, namespaced identifier of a finding's kind (e.g. `STRUCTURAL_UNBALANCED_DELIMITER`),
+defined once in the `REGISTRY` in `src/findings.js`. An agent is expected to match on
+`code`, not parse `message` prose — this is the tool's stable contract.
+_Avoid_: Type, kind, error code.
+
+**Severity**:
+One of `error | warning | info`. `error` fails validation outright; `warning` only
+fails it under `--strict`; `info` is advisory and never fails it.
+_Avoid_: Level, priority.
+
+**Block delimiter**:
+The `<!-- (/)?wp:name {json}? (/)?-->` HTML comment that marks the boundary of a
+Gutenberg block in serialized markup. Layer 1 tokenizes these; Layer 2 (block-runner)
+parses them for real.
+_Avoid_: Block comment, block tag, marker.
+
+**blockName**:
+The name a finding attaches to a block delimiter, always fully-namespaced (e.g.
+`core/paragraph`, `my-plugin/card`) regardless of which layer produced the finding.
+Gutenberg's own delimiter grammar omits the `core/` namespace when *writing* core
+blocks, but this tool's findings normalize it back on for consistency — see
+`qualifyBlockName()` in `src/structural.js`.
+_Avoid_: Block type, block slug (the bare, unqualified form as written in markup —
+distinct from `blockName` as surfaced in a finding).
+
+**PHP fragment**:
+A `.php` input file: WordPress pattern-file convention wraps block markup in one
+leading `<?php ... ?>` header, which Layer 0 strips before validation and re-attaches
+unchanged afterward.
+_Avoid_: PHP file (too broad — this tool only handles the specific header-wrapped
+pattern-file shape, not arbitrary PHP).
+
+**Embedded PHP**:
+A PHP tag found *inside* the block-markup body (not the leading header) — e.g.
+interpolation, conditionals, loops mixed into markup. This region cannot be statically
+validated; Layer 0 masks it out (same-shaped whitespace, to keep line numbers
+accurate) and flags `PHP_INTERPOLATION_UNCHECKED`.
+_Avoid_: Inline PHP, dynamic PHP (used loosely in prose but "embedded PHP" is the
+canonical term tied to the finding code).
+
+**save() diff**:
+The actual check Layer 2 (block-runner) performs: whether a block's stored markup
+still matches what its React `save()` function would currently render. A mismatch is
+the literal cause of the editor's "invalid content" failure this tool exists to
+prevent.
+_Avoid_: Validation (too broad — save() diff is specifically what block-runner does,
+distinct from Layer 0/1 checks).
