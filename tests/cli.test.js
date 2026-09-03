@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { normalizePatternsForPlatform } from '../src/cli.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -86,5 +87,53 @@ describe('CLI wiring', () => {
     expect(status).toBe(1);
     const report = JSON.parse(stdout);
     expect(report.files.map((f) => path.basename(f.file))).toEqual(alphabetical);
+  });
+
+  it.skipIf(process.platform !== 'win32')(
+    'resolves a raw backslash-style Windows pattern to the same file as its forward-slash equivalent',
+    () => {
+      // Regression test for wpbg-q7k: fast-glob treats `\` as an escape
+      // character, not a path separator, so unnormalized backslash patterns
+      // never matched on Windows. This deliberately builds the argv pattern
+      // as a literal relative backslash string (not via `fx()` above, which
+      // pre-normalizes separators for portability, and not via path.join,
+      // which would need a manual .sep check) to exercise the exact argv
+      // shape reported in the bug (`.\tests\...`). `unbalanced-delimiter.html`
+      // trips a blocking structural error, so Layer 2 (block-runner) is
+      // skipped and the run stays fast (see the alphabetical-order test above).
+      const backslashArg = '.\\tests\\fixtures\\wp-block-guard\\unbalanced-delimiter.html';
+      const forwardSlashArg = './tests/fixtures/wp-block-guard/unbalanced-delimiter.html';
+
+      const backslashRun = run([backslashArg, '--json']);
+      const forwardSlashRun = run([forwardSlashArg, '--json']);
+
+      // Pre-fix, the backslash pattern matched nothing (exit 2, "No matching
+      // files"), regardless of what the file itself validates to.
+      expect(backslashRun.status).toBe(forwardSlashRun.status);
+      const backslashReport = JSON.parse(backslashRun.stdout);
+      const forwardSlashReport = JSON.parse(forwardSlashRun.stdout);
+      expect(backslashReport).toEqual(forwardSlashReport);
+      expect(backslashReport.files).toHaveLength(1);
+      expect(path.basename(backslashReport.files[0].file)).toBe('unbalanced-delimiter.html');
+    },
+  );
+});
+
+describe('normalizePatternsForPlatform', () => {
+  it('converts backslashes to forward slashes on win32', () => {
+    const result = normalizePatternsForPlatform(['.\\tests\\fixtures\\foo.html'], 'win32');
+    expect(result).toEqual(['./tests/fixtures/foo.html']);
+  });
+
+  it('leaves forward-slash patterns unchanged on win32', () => {
+    const result = normalizePatternsForPlatform(['./tests/fixtures/foo.html'], 'win32');
+    expect(result).toEqual(['./tests/fixtures/foo.html']);
+  });
+
+  it('passes backslash patterns through unmodified on non-Windows platforms', () => {
+    for (const platform of ['linux', 'darwin']) {
+      const result = normalizePatternsForPlatform(['.\\tests\\fixtures\\foo.html'], platform);
+      expect(result).toEqual(['.\\tests\\fixtures\\foo.html']);
+    }
   });
 });
