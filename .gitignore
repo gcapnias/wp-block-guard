@@ -164,3 +164,14 @@ sketch
 # .firecrawl/ holds output from the firecrawl agent; nothing in it is tracked.
 .firecrawl/*
 !.firecrawl/.gitkeep
+
+### Tool runtime artifacts inside otherwise-tracked directories ###
+# .claude/ is tracked (agents, skills), but agent git worktrees are created inside it.
+# Each is a full checkout with its own .git file and must never be committed.
+.claude/worktrees/
+
+# .beads/ tracks issues.jsonl, but beads_rust leaves transient lock files beside it.
+# .beads/.gitignore already covers "*.lock"; these carry no such suffix.
+# .beads/beads.db-lock-*
+# .beads/beads.db-wal-cert-*-lock-*
+# .beads/beads.db-wal-lock-*
