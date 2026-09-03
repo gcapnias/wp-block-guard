@@ -51,6 +51,23 @@ describe('validateFile — structural pre-check', () => {
     expect(codes).toContain('BLOCK_RUNNER_SKIPPED');
   });
 
+  it('flags out-of-order closers 3+ levels deep (wp:group > wp:columns > wp:column)', async () => {
+    // Gap-closing test for TESTS.md "Known gaps": the existing
+    // mismatched-closer.html fixture only covers a 2-level "swap two
+    // closers" shape. This one nests group > columns > column and closes
+    // columns before column (innermost), then column against the wrong
+    // reopened frame — two independent mismatches, deeper nesting.
+    const result = await validateFile(fx('deeply-nested-mismatched-closer.html'));
+    expect(result.ok).toBe(false);
+    const codes = result.findings.map((f) => f.code);
+    expect(codes.filter((c) => c === 'STRUCTURAL_MISMATCHED_CLOSER')).toHaveLength(2);
+    expect(codes).toContain('BLOCK_RUNNER_SKIPPED');
+    expect(codes).not.toContain('BLOCK_INVALID');
+
+    const mismatches = result.findings.filter((f) => f.code === 'STRUCTURAL_MISMATCHED_CLOSER');
+    expect(mismatches.map((f) => f.blockName)).toEqual(['core/columns', 'core/column']);
+  });
+
   it('flags malformed attribute JSON as STRUCTURAL_INVALID_ATTRS_JSON', async () => {
     const result = await validateFile(fx('invalid-attrs-json.html'));
     expect(result.ok).toBe(false);
@@ -123,6 +140,34 @@ describe('validateFile — --fix', () => {
 
     // The checked-in fixture itself must be untouched.
     const stillOriginal = await fs.readFile(fx('invalid-heading-missing-class.html'), 'utf8');
+    expect(stillOriginal).toBe(original);
+
+    const revalidated = await validateFile(tmpFile);
+    expect(revalidated.ok).toBe(true);
+    expect(revalidated.findings).toEqual([]);
+  }, 45000); // 3 block-runner spawns happen in this test (~10s each steady-state, see README "Known issues" #4)
+
+  it('fixes a file with multiple BLOCK_INVALID findings, correcting all of them', async () => {
+    // Regression/gap-closing test for TESTS.md "Known gaps": --fix was
+    // previously only tested against a single-finding fixture. This fixture
+    // has two separate wp:heading blocks, each missing wp-block-heading.
+    const tmpFile = path.join(os.tmpdir(), `wp-block-guard-fix-multi-test-${Date.now()}.html`);
+    tmpFiles.push(tmpFile);
+    const original = await fs.readFile(fx('two-invalid-headings.html'), 'utf8');
+    await fs.writeFile(tmpFile, original, 'utf8');
+
+    const result = await validateFile(tmpFile, { fix: true });
+    expect(result.fixApplied).toBe(true);
+    expect(result.fixSkippedReason).toBeNull();
+    expect(result.ok).toBe(true);
+    expect(result.findings).toEqual([]);
+    expect(result.summary).toEqual({ errors: 0, warnings: 0 });
+
+    const fixedContent = await fs.readFile(tmpFile, 'utf8');
+    expect(fixedContent.match(/wp-block-heading/g)).toHaveLength(2);
+
+    // The checked-in fixture itself must be untouched.
+    const stillOriginal = await fs.readFile(fx('two-invalid-headings.html'), 'utf8');
     expect(stillOriginal).toBe(original);
 
     const revalidated = await validateFile(tmpFile);

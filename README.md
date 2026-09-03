@@ -153,8 +153,8 @@ proven correct until both items below are checked off._
       (see [`TESTS.md`](TESTS.md)).
 - [x] **Automated vitest suite** against fixtures in `tests/fixtures/wp-block-guard/`,
       covering the pipeline end-to-end plus unit tests for the pure Layer 0/Layer 1
-      functions — complete, 37 tests passing. Full breakdown, fixture-by-fixture coverage,
-      and the 3 bug fixes it verifies: see [`TESTS.md`](TESTS.md).
+      functions — complete, 43 tests passing. Full breakdown, fixture-by-fixture coverage,
+      and the bug fixes it verifies: see [`TESTS.md`](TESTS.md).
 
 ## Known issues
 
@@ -172,6 +172,18 @@ cause, the exact change, and the test that proves each fix:
 - ~~`--strict`'s human-readable output shows `✔ PASS` even when the exit code is `1`.~~
   Fixed in `src/report.js`/`src/cli.js`: `formatHuman()` now takes the `--strict` flag into
   account when deciding each file's printed PASS/FAIL status.
+- ~~`blockName` is inconsistently namespaced between `BLOCK_INVALID` and `STRUCTURAL_*`
+  findings.~~ Fixed in `src/structural.js`: block-runner's reports are always fully-namespaced,
+  while the structural layer's tokenizer parsed the bare delimiter text — see
+  `qualifyBlockName()` in `src/structural.js` for why and how findings are now made consistent.
+- ~~Multi-file JSON output order does not always match the order files were passed on the
+  command line.~~ Not a bug: `src/cli.js` already sorts resolved file paths
+  (`files.filter(...).sort()`) before processing, so `files[]` order is deterministic — it was
+  just undocumented, which is what made an argument-order comparison look like non-determinism.
+  The guarantee: **files are processed and reported in ascending lexicographic order of their
+  full resolved path (plain JS string `sort()` — UTF-16 code-unit order, not locale-aware, not
+  grouped by directory or basename), never command-line argument order.** Don't rely on
+  `files[]` matching the order patterns were passed on the command line.
 
 Remaining open issue:
 
@@ -191,18 +203,6 @@ Remaining open issue:
    "run after every edit" agent loop, ~10s/call is a real usability problem worth
    addressing (e.g. a persistent/warm process, or revisiting whether `block-runner`
    can be used as an in-process library instead of a spawned CLI).
-
-Minor/cosmetic, not yet triaged as bugs:
-
-- `blockName` is inconsistently namespaced: `BLOCK_INVALID` findings (from
-  block-runner) carry `"core/heading"`, but `STRUCTURAL_*` findings (from the
-  structural layer) carry the bare `"heading"`. An agent matching on `blockName`
-  should not assume a consistent format across finding codes until this is resolved.
-- Multi-file JSON output order does not always match the order files were passed on
-  the command line (observed: `good.html bad.html` on the command line produced
-  `bad.html` before `good.html` in `files[]`). Not confirmed harmful, but the ordering
-  guarantee (if any) isn't documented — don't rely on `files[]` order being
-  argument order.
 
 ## Roadmap
 

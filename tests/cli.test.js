@@ -74,4 +74,17 @@ describe('CLI wiring', () => {
     expect(status).toBe(0);
     expect(stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/);
   });
+
+  it('multi-file JSON output is in alphabetical path order regardless of argument order', () => {
+    // Regression/confirmation test for README "Known issues": file paths are
+    // sorted alphabetically in src/cli.js (`files.filter(...).sort()`) before
+    // processing, so files[] order is deterministic — just not argument
+    // order. These three fixtures all trip a blocking structural error, so
+    // Layer 2 (block-runner) is skipped and the run stays fast.
+    const alphabetical = ['invalid-attrs-json.html', 'mismatched-closer.html', 'unbalanced-delimiter.html'];
+    const { status, stdout } = run([...alphabetical].reverse().map(fx).concat('--json'));
+    expect(status).toBe(1);
+    const report = JSON.parse(stdout);
+    expect(report.files.map((f) => path.basename(f.file))).toEqual(alphabetical);
+  });
 });

@@ -33,6 +33,8 @@ Fixtures (`tests/fixtures/wp-block-guard/`):
 | `no-blocks.html` | Plain `<p>Hello</p>` with zero `wp:` delimiters | `STRUCTURAL_NO_BLOCKS` (warning only; `ok: true`) |
 | `pattern-with-header.php` | Leading `<?php /* Title: ... */ ?>` header + clean valid block markup | `PHP_HEADER_STRIPPED` (info); otherwise clean |
 | `pattern-with-interpolation.php` | Leading header + `core/paragraph` block with embedded `<?php echo esc_html($x); ?>` mid-markup | `PHP_HEADER_STRIPPED`, `PHP_INTERPOLATION_UNCHECKED` (exactly one, post-fix); no crash in structural/block-runner layers on the masked remainder |
+| `two-invalid-headings.html` | Two separate `core/heading` blocks, each missing `class="wp-block-heading"` | `BLOCK_INVALID` (x2) |
+| `deeply-nested-mismatched-closer.html` | `wp:group > wp:columns > wp:column` (3 levels), with `/wp:columns` and `/wp:column` closed out of order | `STRUCTURAL_MISMATCHED_CLOSER` (x2), `BLOCK_RUNNER_SKIPPED` |
 
 Each fixture's expected findings were verified empirically by running
 `node bin/wp-block-guard.js <file> --json` before locking in test assertions — none of the
@@ -42,10 +44,10 @@ Test files (`tests/`):
 
 | File | Covers |
 | --- | --- |
-| `structural.test.js` | Unit tests for `tokenizeDelimiters` and `runStructuralLayer` on inline strings (balanced pairs, self-closing delimiters, invalid JSON, non-`wp:` comments, namespaced block names, no-blocks, unbalanced, mismatched closers) |
+| `structural.test.js` | Unit tests for `tokenizeDelimiters`, `runStructuralLayer`, and `qualifyBlockName` on inline strings (balanced pairs, self-closing delimiters, invalid JSON, non-`wp:` comments, namespaced block names, no-blocks, unbalanced, mismatched closers, bare-name-to-`core/`-namespace qualification on findings) |
 | `php-fragment.test.js` | Unit tests for `extractPhpHeader`, `scanForEmbeddedPhp`, `maskEmbeddedPhp` on inline strings, including the bug-2 regression tests (single occurrence per tag, short-echo tags, multiple tags, unterminated opener) |
-| `pipeline.test.js` | `validateFile()` against every fixture above, plus `--fix` behavior (copies the invalid fixture to a temp file first, never mutates the checked-in fixture) and the bug-1 regression test |
-| `cli.test.js` | End-to-end spawns of `bin/wp-block-guard.js`: clean exit 0, `BLOCK_INVALID` exit 1, `--strict` exit-code and (bug-3 regression) human-output PASS/FAIL labeling, no-args usage error (exit 2, help to stderr), no-glob-match usage error (exit 2), `--version` |
+| `pipeline.test.js` | `validateFile()` against every fixture above, plus `--fix` behavior (copies the invalid fixture to a temp file first, never mutates the checked-in fixture), the bug-1 regression test, multi-finding `--fix` (`two-invalid-headings.html`), and 3-level nested mismatched closers (`deeply-nested-mismatched-closer.html`) |
+| `cli.test.js` | End-to-end spawns of `bin/wp-block-guard.js`: clean exit 0, `BLOCK_INVALID` exit 1, `--strict` exit-code and (bug-3 regression) human-output PASS/FAIL labeling, no-args usage error (exit 2, help to stderr), no-glob-match usage error (exit 2), `--version`, and multi-file JSON output ordering (alphabetical by full path, independent of argument order) |
 
 ## Files modified in `src/`
 
@@ -126,6 +128,43 @@ No bugs were left as documented failing/red tests — all three were small, low-
 behavior-preserving-except-for-the-bug fixes, so all three were fixed directly per the "prefer
 (a) if the fix is small and obviously safe" guidance.
 
+### Bug 4 — `blockName` inconsistently namespaced (`src/structural.js`)
+
+**Root cause:** block-runner's `BLOCK_INVALID` reports are always fully-namespaced, while the
+structural layer's tokenizer parsed the bare delimiter text as written — see `qualifyBlockName()`
+in `src/structural.js` for the full explanation of why core blocks' delimiters omit the
+namespace.
+
+**Fix:** `src/structural.js` adds `qualifyBlockName(name)`, applied by `checkStructuralBalance`
+only where a name is surfaced in a finding (`blockName` field and the human-readable `detail`
+text) — the balance-tracking stack (`stack`) still pushes/pops/matches openers and closers using
+the raw, unqualified name parsed from the delimiter, so nesting logic is unaffected.
+
+**Proof:** `tests/structural.test.js` has a dedicated `qualifyBlockName` unit-test block
+(bare → `core/<name>`, namespaced left as-is) plus updated `runStructuralLayer` assertions
+(`STRUCTURAL_UNBALANCED_DELIMITER` on `<!-- wp:heading -->` now asserts `blockName: 'core/heading'`;
+a new test confirms `<!-- wp:my-plugin/card -->` stays `'my-plugin/card'`).
+
+### Bug 5 — multi-file JSON output ordering (documentation, not code)
+
+**Investigation:** the README claimed `files[]` ordering "does not always match" argument
+order and wasn't confirmed deterministic. Reading `src/cli.js` showed `files.filter(...).sort()`
+already runs before any file is processed, and `buildReport()` in `src/report.js` just maps
+`fileResults` through in the order `cli.js`'s `for (const file of files)` loop pushed them —
+no reordering happens after the sort. An empirical multi-file run (3 fixtures passed in
+reverse-alphabetical argument order) confirmed `files[]` comes back in ascending path order
+every time. **Conclusion: this was stale documentation of a real (if undocumented) guarantee,
+not a bug** — the "not confirmed harmful" observation in the README was a case of argument
+order being mistaken for non-determinism.
+
+**Fix:** no code change; README now states the actual guarantee plainly (ascending
+lexicographic order of the full resolved path, plain JS `sort()` semantics — not locale-aware,
+not grouped by directory/basename — never argument order).
+
+**Proof:** `tests/cli.test.js` → `multi-file JSON output is in alphabetical path order
+regardless of argument order` spawns the CLI with three fixtures in reverse-alphabetical
+argument order and asserts `report.files` comes back in alphabetical order.
+
 ## Final test run
 
 ```
@@ -133,38 +172,49 @@ $ npx vitest run
  RUN  v4.1.11 E:/Shared/Workspaces/personal/firecrawl-cli
 
  Test Files  4 passed (4)
-      Tests  37 passed (37)
-   Start at  09:26:13
-   Duration  84.72s (transform 173ms, setup 0ms, import 288ms, tests 134.76s, environment 0ms)
+      Tests  43 passed (43)
+   Duration  122.31s (transform 205ms, setup 0ms, import 342ms, tests 172.72s, environment 1ms)
 ```
 
 No skips. Wall-clock time is dominated by real `block-runner` process spawns (~10s
 steady-state each, per README "Known issues" #4 — a known, separately-tracked performance
 issue, not something addressed by this test suite). `vitest.config.js` sets a 20s default
-`testTimeout` to cover single-spawn tests; the two tests that perform 2–3 sequential
-block-runner spawns (`--fix` pipeline test, `--strict` two-invocation CLI test) have explicit
-higher per-test timeouts (45000ms / 30000ms).
+`testTimeout` to cover single-spawn tests; tests that perform 2–3 sequential block-runner
+spawns (both `--fix` pipeline tests, `--strict` two-invocation CLI test) have explicit higher
+per-test timeouts (45000ms / 30000ms).
 
 ## Known gaps / not covered
 
 - **Performance (README issue #4)** is explicitly out of scope for this suite — it's a
   characteristic of `block-runner`'s own process-startup cost, not a correctness bug, and the
-  task instructions were explicit not to let it drive unrealistic test timeouts.
-- **The two "minor/cosmetic, not yet triaged" items** in the README (inconsistent
-  `blockName` namespacing between `BLOCK_INVALID` (`core/heading`) and `STRUCTURAL_*`
-  (`heading`) findings; multi-file JSON output ordering not guaranteed to match argument
-  order) are **not** covered by any test here and are not fixed — they were explicitly called
-  out as not-yet-triaged bugs, not something this task asked to resolve. An agent relying on
-  `blockName` format consistency or `files[]` ordering should not assume either is guaranteed.
-- **`--fix` is only tested against one fixture** (`invalid-heading-missing-class.html`, a
-  single near-miss block-runner finding). It is not tested against a file with multiple
-  `BLOCK_INVALID` findings, or a file where `fixMarkup` itself fails/returns null
-  (`fixSkippedReason: 'block-runner "fix" did not produce output.'` path is untested).
-- **`BLOCK_RUNNER_WARNING` and `BLOCK_RUNNER_FAILURE`** finding codes have no dedicated
-  fixture/test — no fixture in this suite is known to trigger a block-runner *warning*
-  (vs. error) status, and `BLOCK_RUNNER_FAILURE` (block-runner itself failing to invoke or
-  returning bad output) was not exercised.
+  task instructions were explicit not to let it drive unrealistic test timeouts. A parallel,
+  separate effort is rewriting `src/block-runner-adapter.js` to call block-runner's in-process
+  library API instead of spawning its CLI, specifically to address this — that file was
+  deliberately left untouched by this round of work.
+- **`--fix` against a file where `fixMarkup` itself fails/returns null** (the
+  `fixSkippedReason: 'block-runner "fix" did not produce output.'` path) and
+  **`BLOCK_RUNNER_FAILURE`** (block-runner itself failing to invoke, or returning unparseable
+  output) both remain untested. Both depend on `src/block-runner-adapter.js`'s internals
+  (subprocess spawn failure, non-JSON stdout, `fix`'s temp-file `--out` step failing) — exactly
+  the code the parallel adapter rewrite is actively changing, including what its `ok`/`error`
+  shape looks like on failure. Deliberately left as an open gap pending that rewrite landing,
+  rather than writing tests against internals known to be in flux.
+- **`BLOCK_RUNNER_WARNING` has no fixture/test, and is very likely unreachable as things
+  stand.** Investigated by reading `block-runner`'s own `dist/index.js` (v0.8.0, the installed
+  version): its exported `validate(markup, options)` — the function backing both the `validate`
+  CLI command wp-block-guard's adapter spawns (`block-runner validate - --json`) and the
+  in-process library call the parallel adapter rewrite is moving to (`import { validate } from
+  'block-runner'`) — only ever pushes `items` with `status: "invalid"`; `summary.warnings` is
+  hardcoded to `0` and never incremented on that path. The only `status: "warning"` sites in
+  block-runner's bundle (`warnings.push({..., status: "warning", ...})`, `capabilities.note`,
+  etc.) live inside `runConvert()`, the implementation of the separate `convert` command, which
+  wp-block-guard never calls. So under block-runner 0.8.0, `item.status === 'warning'` in
+  `src/pipeline.js`'s `code = item.status === 'warning' ? 'BLOCK_RUNNER_WARNING' : 'BLOCK_INVALID'`
+  branch appears to be dead code reachable through neither the current subprocess adapter nor
+  the library API the parallel rewrite is adopting — not just untested, but with no known way
+  to construct a fixture that would trigger it via `validate`/`fix`. Left as an open gap rather
+  than faked; `BLOCK_RUNNER_WARNING`'s entries in the README finding-code table and
+  `src/findings.js`'s registry were left in place since removing a documented finding code from
+  the stable contract is out of scope here.
 - **Bun/standalone-executable roadmap item** (mentioned in README "Roadmap") is unrelated to
   this Node/vitest suite and untouched.
-- The mismatched-closer fixture only tests one specific "swap two closers" shape; deeper
-  nesting (3+ levels) of mismatched closers is not covered.
