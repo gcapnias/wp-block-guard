@@ -187,7 +187,7 @@ proven correct until both items below are checked off._
       (see [`tests/README.md`](tests/README.md)).
 - [x] **Automated vitest suite** against fixtures in `tests/fixtures/wp-block-guard/`,
       covering the pipeline end-to-end plus unit tests for the pure Layer 0/Layer 1
-      functions — complete, 43 tests passing. Full breakdown, fixture-by-fixture coverage:
+      functions — complete, 48 tests passing. Full breakdown, fixture-by-fixture coverage:
       see [`tests/README.md`](tests/README.md).
 
 ## Known issues
@@ -221,25 +221,37 @@ for test coverage:
 
 Remaining open issue:
 
-1. **Performance: ~10.2–10.5s per invocation, steady-state, regardless of file size.**
-   `--help`'s stated design goal (see [`src/help.js`](src/help.js)) was to avoid `npx`'s
-   ~12s/call resolution overhead by spawning the installed `block-runner` CLI directly;
-   in practice, per-invocation cost is still ~10s, only marginally better than the
-   `npx` path it was built to avoid. Likely cause: `block-runner`'s own dependency tree
-   (`@wordpress/block-editor`, `@wordpress/block-library`, React, react-dom — 350
-   packages total) has to load fresh on every process start; this is a `block-runner`
-   process-startup cost, not slowness in `wp-block-guard`'s own logic. Also note:
-   `npm install` blocked a `block-runner` postinstall script
-   (`node scripts/prune-wp-vips.mjs`, intended to prune WordPress/vips-related deps)
-   because it isn't covered by `allowScripts` — this may or may not be related to the
-   startup cost and should be checked (`npm install-scripts approve block-runner` and
-   re-measure) before assuming the cost is unavoidable. For the documented
-   "run after every edit" agent loop, ~10s/call is a real usability problem worth
-   addressing (e.g. a persistent/warm process, or revisiting whether `block-runner`
-   can be used as an in-process library instead of a spawned CLI).
+1. **Performance: ~10–11s of fixed start-up cost per run.**
+   Booting `block-runner`'s dependency tree (`@wordpress/block-editor`,
+   `@wordpress/block-library`, React, jsdom — 350 packages) dominates every run,
+   regardless of file size. This is a `block-runner` start-up cost, not slowness in
+   `wp-block-guard`'s own logic.
+
+   **This cost used to be paid per _file_, not per run.** Layer 2 spawned
+   `block-runner`'s CLI as a subprocess inside `src/cli.js`'s per-file loop, so the
+   boot repeated for every file: one file took 11.3s and two took 20.6s, and a
+   68-file theme took roughly ten minutes. The adapter now calls `block-runner`’s
+   library API in-process, so the boot happens once per run and each file after the
+   first costs 11–36ms. That same 68-file theme now takes seconds.
+
+   What remains open is the fixed ~10s itself — checking a single file is still
+   slow. Closing that needs a long-lived process the CLI talks to, instead of
+   booting the stack once per invocation.
+   One lead not yet chased: `npm install` blocked a `block-runner` postinstall script
+   (`node scripts/prune-wp-vips.mjs`, which prunes WordPress/vips-related deps)
+   because it is not covered by `allowScripts`. Since the remaining cost is exactly
+   "load a 350-package tree", approving it and re-measuring
+   (`npm install-scripts approve block-runner`) is worth doing before assuming the
+   ~10s is unavoidable.
 
 ## Roadmap
 
-- `handoff/` will hold implementation handoff documents for follow-on work (e.g. a
-  feasibility/implementation report on compiling this tool to a standalone Bun
-  executable) once that research completes.
+- [x] **Standalone executable feasibility** — researched and attempted; see
+      [`handoff/2026-09-03-bun-compile-wp-block-guard-handoff.md`](handoff/2026-09-03-bun-compile-wp-block-guard-handoff.md)
+      and
+      [`handoff/2026-09-03-bun-compile-implementation-report.md`](handoff/2026-09-03-bun-compile-implementation-report.md).
+      The in-process adapter it recommended has landed; `bun build --compile` itself is
+      blocked upstream (see above).
+- `handoff/` holds implementation handoff documents for follow-on work, written before a
+  worktree is torn down so the findings outlive it.
+
