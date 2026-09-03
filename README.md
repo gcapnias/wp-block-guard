@@ -54,7 +54,7 @@ The source of truth for that text is [`src/help.js`](src/help.js).
 | --- | --- |
 | `--json` | Emit a single machine-readable JSON report on stdout instead of human-readable text. |
 | `--strict` | Exit `1` if any warnings are present, not only errors. |
-| `--fix` | Canonicalize near-miss markup in place via `block-runner fix`, only for files whose sole findings are block-runner attribute/class/whitespace mismatches. Files with structural errors or embedded PHP interpolation are left untouched and reported as "fix skipped" with a reason. |
+| `--fix` | Canonicalize near-miss markup in place via block-runner's `canonicalize()`, only for files whose sole findings are block-runner attribute/class/whitespace mismatches. Files with structural errors or embedded PHP interpolation are left untouched and reported as "fix skipped" with a reason. |
 | `-h`, `--help` | Show the full help text. |
 | `-v`, `--version` | Show the installed version. |
 
@@ -72,7 +72,7 @@ src/cli.js                 argv parsing, glob expansion, orchestration, exit cod
 src/pipeline.js            per-file pipeline: Layer 0 -> Layer 1 -> Layer 2 -> optional --fix
 src/php-fragment.js        Layer 0: PHP header stripping + embedded-PHP flagging
 src/structural.js          Layer 1: dependency-free block-delimiter balance checker
-src/block-runner-adapter.js Layer 2: invokes the installed block-runner CLI directly
+src/block-runner-adapter.js Layer 2: calls the installed block-runner library API in-process
 src/findings.js            finding-code registry (code, severity, message, fix)
 src/report.js              aggregates per-file results, formats JSON/human output
 src/help.js                --help text (single source of truth, also feeds the finding-code table)
@@ -102,13 +102,47 @@ misleading "valid" on corrupted input.
 
 ### Layer 2 — block-runner invocation (`src/block-runner-adapter.js`)
 
-Runs the actual `save()`-diff check against headless Gutenberg by spawning the
-*installed* `block-runner` package's own CLI script directly via `process.execPath`,
-resolved through `block-runner/package.json`'s `bin` field — deliberately **not**
-`npx block-runner`, which was measured at ~12 seconds of pure resolution overhead per
-call versus ~0.1–0.2s of actual validation work. `validate` uses stdin (`-` with
-`--json`); `fix` uses temp files with `--out`, matching the exact invocation shapes
-confirmed to work in manual testing.
+Runs the actual `save()`-diff check against headless Gutenberg by importing and
+calling `block-runner`'s own in-process library API directly —
+`import { validate, canonicalize } from 'block-runner'` — rather than spawning
+its CLI as a subprocess. This is both simpler (no `process.execPath`/`bin`-field
+resolution, no npx overhead) and required for compatibility with `bun build
+--compile` (see `npm run compile` below): a subprocess spawn targeting a
+dependency's script cannot work from inside a compiled binary, since the
+dependency is embedded in Bun's virtual filesystem, which the OS process loader
+cannot open. `validate(markup)` and `canonicalize(markup)` both resolve to the
+same `{ ok, command, summary, items, output? }` report shape the old CLI's
+`--json` output serialized; `fixMarkup()` reads the fixed markup off the
+report's `output` field (the CLI's `fix` verb has no separate library `fix()`
+export — `canonicalize()` is its in-process equivalent).
+
+### Compiling a standalone executable (Bun)
+
+`npm run compile` runs `bun build --compile ./bin/wp-block-guard.js --outfile
+bin/wp-block-guard.exe`, producing a self-contained executable that needs
+neither Node nor a `node_modules` install to run. This requires
+[Bun](https://bun.com) (tested with v1.4.0) on the machine doing the build —
+a build-time-only tool, separate from the `node >=20` `engines` requirement
+for running the CLI normally. The compiled `.exe` is a build artifact, not
+committed to the repo (`bin/*.exe` is gitignored).
+
+**Current status: does not work.** Compiling succeeds, but the resulting
+binary fails to even start — `./bin/wp-block-guard.exe --help` fails exactly
+like `validate` does, with `error: Cannot find module '../data/patch.json'
+from 'B:\~BUN\root\wp-block-guard.exe'`, because `block-runner` (and its
+transitive `jsdom` dependency) is imported at module top level, so the
+failure happens before argv is even parsed. The failure itself is in
+`css-tree` (pulled in via `jsdom`, itself a dependency of `block-runner`),
+which loads a JSON data file via `createRequire(import.meta.url)` + a
+relative `require()` call — a pattern Bun's `--compile` bundler does not
+statically resolve/embed, so the lookup fails against the compiled binary's
+virtual filesystem at runtime. Plain `bun run bin/wp-block-guard.js`
+(uncompiled) works correctly against the same fixtures, confirming the
+in-process library rewrite itself is sound under Bun's runtime — the
+remaining gap is specific to `bun build --compile`'s bundling of this
+transitive dependency, not to `wp-block-guard`'s own code. `node
+bin/wp-block-guard.js` is unaffected and remains the supported way to run
+this tool.
 
 ## Finding codes
 

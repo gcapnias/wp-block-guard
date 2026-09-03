@@ -175,3 +175,6 @@ sketch
 # .beads/beads.db-lock-*
 # .beads/beads.db-wal-cert-*-lock-*
 # .beads/beads.db-wal-lock-*
+
+# Compiled standalone executable produced by `npm run compile` (bun build --compile)
+bin/*.exe
