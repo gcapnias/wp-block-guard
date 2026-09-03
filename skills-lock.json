@@ -8,12 +8,6 @@
       "skillPath": "skills/engineering/ask-matt/SKILL.md",
       "computedHash": "e5404aef8525ca0c8fc76692567a38dfdd5d0cc1a9f8d47c02c18f29f60d92a6"
     },
-    "br": {
-      "source": "dicklesworthstone/beads_rust",
-      "sourceType": "github",
-      "skillPath": ".claude/skills/br/SKILL.md",
-      "computedHash": "68d979ce10209b77b2eefa718f55cc921d018570adf44d3a1bc327178d2a5b4f"
-    },
     "ce-commit": {
       "source": "everyinc/compound-engineering-plugin",
       "sourceType": "github",
