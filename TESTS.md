@@ -44,7 +44,7 @@ Test files (`tests/`):
 
 | File | Covers |
 | --- | --- |
-| `structural.test.js` | Unit tests for `tokenizeDelimiters`, `runStructuralLayer`, and `normalizeBlockName` on inline strings (balanced pairs, self-closing delimiters, invalid JSON, non-`wp:` comments, namespaced block names, no-blocks, unbalanced, mismatched closers, bare-name-to-`core/`-namespace normalization on findings) |
+| `structural.test.js` | Unit tests for `tokenizeDelimiters`, `runStructuralLayer`, and `qualifyBlockName` on inline strings (balanced pairs, self-closing delimiters, invalid JSON, non-`wp:` comments, namespaced block names, no-blocks, unbalanced, mismatched closers, bare-name-to-`core/`-namespace qualification on findings) |
 | `php-fragment.test.js` | Unit tests for `extractPhpHeader`, `scanForEmbeddedPhp`, `maskEmbeddedPhp` on inline strings, including the bug-2 regression tests (single occurrence per tag, short-echo tags, multiple tags, unterminated opener) |
 | `pipeline.test.js` | `validateFile()` against every fixture above, plus `--fix` behavior (copies the invalid fixture to a temp file first, never mutates the checked-in fixture), the bug-1 regression test, multi-finding `--fix` (`two-invalid-headings.html`), and 3-level nested mismatched closers (`deeply-nested-mismatched-closer.html`) |
 | `cli.test.js` | End-to-end spawns of `bin/wp-block-guard.js`: clean exit 0, `BLOCK_INVALID` exit 1, `--strict` exit-code and (bug-3 regression) human-output PASS/FAIL labeling, no-args usage error (exit 2, help to stderr), no-glob-match usage error (exit 2), `--version`, and multi-file JSON output ordering (alphabetical by full path, independent of argument order) |
@@ -130,23 +130,17 @@ behavior-preserving-except-for-the-bug fixes, so all three were fixed directly p
 
 ### Bug 4 — `blockName` inconsistently namespaced (`src/structural.js`)
 
-**Root cause confirmed:** in real Gutenberg markup, core blocks omit the `core/` namespace in
-their `<!-- wp:name -->` delimiter comment — only non-core blocks write a full
-`namespace/name` (e.g. `<!-- wp:my-plugin/card -->`). `tests/fixtures/wp-block-guard/invalid-heading-missing-class.html`
-confirms this empirically: its delimiter is literally `<!-- wp:heading -->` (bare), yet
-block-runner's own `BLOCK_INVALID` report for that same block returns `"core/heading"`. The
-structural layer's tokenizer parses the delimiter text verbatim (correctly), so its findings
-carried the bare name, while `BLOCK_INVALID` findings (sourced from block-runner's report, not
-the delimiter text) always carry the full namespace — hence the inconsistency.
+**Root cause:** block-runner's `BLOCK_INVALID` reports are always fully-namespaced, while the
+structural layer's tokenizer parsed the bare delimiter text as written — see `qualifyBlockName()`
+in `src/structural.js` for the full explanation of why core blocks' delimiters omit the
+namespace.
 
-**Fix:** `src/structural.js` adds `normalizeBlockName(name)`, which maps a bare name (no `/`)
-to `core/<name>` and leaves an already-namespaced name untouched. `checkStructuralBalance`
-applies it only where a name is surfaced in a finding (`blockName` field and the human-readable
-`detail` text) — the balance-tracking stack (`stack`) still pushes/pops/matches openers and
-closers using the raw, un-normalized name parsed from the delimiter, so nesting logic is
-unaffected.
+**Fix:** `src/structural.js` adds `qualifyBlockName(name)`, applied by `checkStructuralBalance`
+only where a name is surfaced in a finding (`blockName` field and the human-readable `detail`
+text) — the balance-tracking stack (`stack`) still pushes/pops/matches openers and closers using
+the raw, unqualified name parsed from the delimiter, so nesting logic is unaffected.
 
-**Proof:** `tests/structural.test.js` has a dedicated `normalizeBlockName` unit-test block
+**Proof:** `tests/structural.test.js` has a dedicated `qualifyBlockName` unit-test block
 (bare → `core/<name>`, namespaced left as-is) plus updated `runStructuralLayer` assertions
 (`STRUCTURAL_UNBALANCED_DELIMITER` on `<!-- wp:heading -->` now asserts `blockName: 'core/heading'`;
 a new test confirms `<!-- wp:my-plugin/card -->` stays `'my-plugin/card'`).

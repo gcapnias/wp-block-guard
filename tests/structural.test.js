@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tokenizeDelimiters, runStructuralLayer, normalizeBlockName } from '../src/structural.js';
+import { tokenizeDelimiters, runStructuralLayer, qualifyBlockName } from '../src/structural.js';
 
 describe('tokenizeDelimiters', () => {
   it('tokenizes a balanced open/close pair with JSON attrs', () => {
@@ -34,13 +34,13 @@ describe('tokenizeDelimiters', () => {
   });
 });
 
-describe('normalizeBlockName', () => {
-  it('normalizes a bare core block name to the "core/" namespace', () => {
-    expect(normalizeBlockName('heading')).toBe('core/heading');
+describe('qualifyBlockName', () => {
+  it('qualifies a bare core block name to the "core/" namespace', () => {
+    expect(qualifyBlockName('heading')).toBe('core/heading');
   });
 
   it('leaves an already-namespaced non-core block name as-is', () => {
-    expect(normalizeBlockName('my-plugin/card')).toBe('my-plugin/card');
+    expect(qualifyBlockName('my-plugin/card')).toBe('my-plugin/card');
   });
 });
 
@@ -55,7 +55,7 @@ describe('runStructuralLayer', () => {
     expect(findings).toHaveLength(1);
     expect(findings[0].code).toBe('STRUCTURAL_UNBALANCED_DELIMITER');
     // Bare delimiter names (as written by core blocks, e.g. "wp:heading" with
-    // no namespace) are normalized to "core/<name>" in the finding, to match
+    // no namespace) are qualified to "core/<name>" in the finding, to match
     // the namespacing BLOCK_INVALID findings carry from block-runner.
     expect(findings[0].blockName).toBe('core/heading');
   });

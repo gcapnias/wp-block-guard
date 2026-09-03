@@ -173,14 +173,9 @@ cause, the exact change, and the test that proves each fix:
   Fixed in `src/report.js`/`src/cli.js`: `formatHuman()` now takes the `--strict` flag into
   account when deciding each file's printed PASS/FAIL status.
 - ~~`blockName` is inconsistently namespaced between `BLOCK_INVALID` and `STRUCTURAL_*`
-  findings.~~ Root cause confirmed: in real Gutenberg markup, core blocks omit the `core/`
-  namespace in their `<!-- wp:name -->` delimiter comment (only non-core blocks write a full
-  `namespace/name`, e.g. `<!-- wp:my-plugin/card -->`), so the structural layer's own
-  tokenizer legitimately parses the bare name — but block-runner's report always returns the
-  fully-namespaced name. Fixed in `src/structural.js`: a new `normalizeBlockName()` helper
-  normalizes a bare name (no `/`) to `core/<name>` wherever a name is surfaced in a finding
-  (leaving an already-namespaced name untouched); the balance-tracking stack in
-  `checkStructuralBalance` still matches openers/closers by the raw parsed name, unaffected.
+  findings.~~ Fixed in `src/structural.js`: block-runner's reports are always fully-namespaced,
+  while the structural layer's tokenizer parsed the bare delimiter text — see
+  `qualifyBlockName()` in `src/structural.js` for why and how findings are now made consistent.
 - ~~Multi-file JSON output order does not always match the order files were passed on the
   command line.~~ Not a bug: `src/cli.js` already sorts resolved file paths
   (`files.filter(...).sort()`) before processing, so `files[]` order is deterministic — it was

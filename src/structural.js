@@ -157,19 +157,20 @@ export function tokenizeDelimiters(content) {
 }
 
 /**
- * Normalize a block name the way Gutenberg's own delimiter grammar does:
- * core blocks omit the "core/" namespace in their "<!-- wp:name -->"
- * comment (e.g. "<!-- wp:heading -->"), while non-core blocks always write
- * a full "namespace/name" (e.g. "<!-- wp:my-plugin/card -->"). This keeps
- * a bare name (no "/") as parsed internally by the tokenizer/balance-stack
- * (which must keep matching openers/closers by the exact text that was
- * written), but normalizes it to "core/<name>" only where a name is
- * surfaced in a finding — so `blockName` is consistently namespaced with
- * the `BLOCK_INVALID` findings block-runner itself produces (see
- * src/pipeline.js and README "Known issues").
+ * Qualify a block name the way Gutenberg's own delimiter grammar does: core
+ * blocks omit the "core/" namespace in their "<!-- wp:name -->" comment
+ * (e.g. "<!-- wp:heading -->"), while non-core blocks always write a full
+ * "namespace/name" (e.g. "<!-- wp:my-plugin/card -->"). This keeps a bare
+ * name (no "/") as parsed internally by the tokenizer/balance-stack (which
+ * must keep matching openers/closers by the exact text that was written),
+ * but qualifies it to "core/<name>" only where a name is surfaced in a
+ * finding — so `blockName` is consistently namespaced with the
+ * `BLOCK_INVALID` findings block-runner itself produces (see
+ * src/pipeline.js).
  * @param {string} name
+ * @returns {string}
  */
-export function normalizeBlockName(name) {
+export function qualifyBlockName(name) {
   if (!name || name.includes('/')) return name;
   return `core/${name}`;
 }
@@ -184,10 +185,11 @@ export function checkStructuralBalance(tokens) {
 
   for (const token of tokens) {
     if (token.attrsRaw !== null && !token.attrsValid) {
+      const name = qualifyBlockName(token.blockName);
       findings.push({
         code: 'STRUCTURAL_INVALID_ATTRS_JSON',
         line: token.line,
-        blockName: normalizeBlockName(token.blockName),
+        blockName: name,
       });
     }
 
@@ -195,19 +197,21 @@ export function checkStructuralBalance(tokens) {
 
     if (token.closing) {
       const top = stack[stack.length - 1];
+      const name = qualifyBlockName(token.blockName);
       if (!top) {
         findings.push({
           code: 'STRUCTURAL_MISMATCHED_CLOSER',
           line: token.line,
-          blockName: normalizeBlockName(token.blockName),
-          detail: `Closing comment for "${normalizeBlockName(token.blockName)}" found with no matching opener.`,
+          blockName: name,
+          detail: `Closing comment for "${name}" found with no matching opener.`,
         });
       } else if (top.blockName !== token.blockName) {
+        const topName = qualifyBlockName(top.blockName);
         findings.push({
           code: 'STRUCTURAL_MISMATCHED_CLOSER',
           line: token.line,
-          blockName: normalizeBlockName(token.blockName),
-          detail: `Closing comment for "${normalizeBlockName(token.blockName)}" does not match innermost open block "${normalizeBlockName(top.blockName)}" (opened at line ${top.line}).`,
+          blockName: name,
+          detail: `Closing comment for "${name}" does not match innermost open block "${topName}" (opened at line ${top.line}).`,
         });
         stack.pop(); // best-effort recovery so one mistake doesn't cascade into every remaining token
       } else {
@@ -219,11 +223,12 @@ export function checkStructuralBalance(tokens) {
   }
 
   for (const unclosed of stack) {
+    const name = qualifyBlockName(unclosed.blockName);
     findings.push({
       code: 'STRUCTURAL_UNBALANCED_DELIMITER',
       line: unclosed.line,
-      blockName: normalizeBlockName(unclosed.blockName),
-      detail: `Block "${normalizeBlockName(unclosed.blockName)}" opened at line ${unclosed.line} is never closed.`,
+      blockName: name,
+      detail: `Block "${name}" opened at line ${unclosed.line} is never closed.`,
     });
   }
 

@@ -27,31 +27,17 @@ Explicitly out of scope, left untouched:
 
 ## 2. Item 1 — `blockName` inconsistent namespacing (fixed)
 
-**Root cause, confirmed empirically (not assumed):** in real Gutenberg markup, core
-blocks omit the `core/` namespace in their `<!-- wp:name -->` delimiter comment;
-only non-core blocks write a full `namespace/name`
-(e.g. `<!-- wp:my-plugin/card -->`). The checked-in fixture
-`tests/fixtures/wp-block-guard/invalid-heading-missing-class.html` proves this: its
-delimiter is literally
-
-```html
-<!-- wp:heading {"level":2} -->
-<h2>Hello World</h2>
-<!-- /wp:heading -->
-```
-
-— bare `wp:heading`, no namespace. Running `node bin/wp-block-guard.js` against it
-produces a `BLOCK_INVALID` finding with `"blockName": "core/heading"` — sourced from
-block-runner's own report (`item.block`), which always returns the fully-namespaced
-block name, not the delimiter text. `src/structural.js`'s tokenizer, by contrast,
-parses the delimiter comment verbatim (`readName()` reads exactly what's between
-`wp:` and the next whitespace/`{`/`-->`), so its findings previously carried the
-bare `"heading"`. Both are "correct" for what they read from — the inconsistency was
-real, not a parsing bug in either layer.
+**Root cause:** block-runner's `BLOCK_INVALID` reports (`item.block`) are always
+fully-namespaced, while `src/structural.js`'s tokenizer parses the `<!-- wp:name -->`
+delimiter comment verbatim — see `qualifyBlockName()` in `src/structural.js` for why
+core blocks' delimiters omit the `core/` namespace and non-core blocks don't. Confirmed
+empirically against the checked-in fixture
+`tests/fixtures/wp-block-guard/invalid-heading-missing-class.html` (bare `wp:heading`
+delimiter, but `BLOCK_INVALID.blockName` reports `"core/heading"`).
 
 **Fix — `src/structural.js`:**
 
-- Added `normalizeBlockName(name)`: returns `name` unchanged if it contains `/`
+- Added `qualifyBlockName(name)`: returns `name` unchanged if it contains `/`
   (already namespaced), otherwise returns `` `core/${name}` ``.
 - Applied it inside `checkStructuralBalance()` only at the point findings are
   constructed — the `blockName` field of every `STRUCTURAL_INVALID_ATTRS_JSON`,
@@ -61,7 +47,7 @@ real, not a parsing bug in either layer.
   "core/columns" does not match innermost open block "core/column"...`).
 - Deliberately **not** applied inside `tokenizeDelimiters()` or to the `stack` used
   for balance tracking in `checkStructuralBalance()` — openers and closers are still
-  pushed/popped/matched by the raw parsed name exactly as before. Normalization only
+  pushed/popped/matched by the raw parsed name exactly as before. Qualification only
   happens at the finding-construction boundary, so nesting/balance semantics are
   unchanged.
 
@@ -77,8 +63,8 @@ now sees a consistent value.
 
 **Tests** (`tests/structural.test.js`):
 
-- New `describe('normalizeBlockName', ...)` block: `normalizeBlockName('heading')
-  === 'core/heading'`; `normalizeBlockName('my-plugin/card') === 'my-plugin/card'`
+- New `describe('qualifyBlockName', ...)` block: `qualifyBlockName('heading')
+  === 'core/heading'`; `qualifyBlockName('my-plugin/card') === 'my-plugin/card'`
   (unchanged).
 - Updated `runStructuralLayer` tests: the unbalanced-delimiter case now asserts
   `findings[0].blockName === 'core/heading'`; the mismatched-closer case asserts
@@ -266,7 +252,7 @@ $ npx vitest run
 ```
 
 Up from 37 tests (pre-existing baseline) to 43: +6 tests
-(`normalizeBlockName` ×2, updated/new `runStructuralLayer` assertions ×1 new case,
+(`qualifyBlockName` ×2, updated/new `runStructuralLayer` assertions ×1 new case,
 multi-finding `--fix` ×1, deep-nesting mismatched-closer ×1, multi-file ordering
 ×1). No skips, no failures.
 
@@ -317,11 +303,11 @@ Files changed (8 total, per `git show --stat`):
 
 - `README.md` — modified (§6)
 - `TESTS.md` — modified (§6)
-- `src/structural.js` — modified (`normalizeBlockName`, §2)
+- `src/structural.js` — modified (`qualifyBlockName`, §2)
 - `tests/cli.test.js` — modified (new ordering test, §3)
 - `tests/pipeline.test.js` — modified (new multi-fix test §4a, new deep-nesting
   test §4c)
-- `tests/structural.test.js` — modified (`normalizeBlockName` unit tests, updated
+- `tests/structural.test.js` — modified (`qualifyBlockName` unit tests, updated
   existing assertions, §2)
 - `tests/fixtures/wp-block-guard/two-invalid-headings.html` — new (§4a)
 - `tests/fixtures/wp-block-guard/deeply-nested-mismatched-closer.html` — new (§4c)
