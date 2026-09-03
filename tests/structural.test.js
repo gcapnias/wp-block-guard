@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tokenizeDelimiters, runStructuralLayer } from '../src/structural.js';
+import { tokenizeDelimiters, runStructuralLayer, normalizeBlockName } from '../src/structural.js';
 
 describe('tokenizeDelimiters', () => {
   it('tokenizes a balanced open/close pair with JSON attrs', () => {
@@ -34,6 +34,16 @@ describe('tokenizeDelimiters', () => {
   });
 });
 
+describe('normalizeBlockName', () => {
+  it('normalizes a bare core block name to the "core/" namespace', () => {
+    expect(normalizeBlockName('heading')).toBe('core/heading');
+  });
+
+  it('leaves an already-namespaced non-core block name as-is', () => {
+    expect(normalizeBlockName('my-plugin/card')).toBe('my-plugin/card');
+  });
+});
+
 describe('runStructuralLayer', () => {
   it('returns STRUCTURAL_NO_BLOCKS for content with no wp: delimiters', () => {
     const findings = runStructuralLayer('<p>Hello</p>');
@@ -44,7 +54,10 @@ describe('runStructuralLayer', () => {
     const findings = runStructuralLayer('<!-- wp:heading -->\n<h2>Hi</h2>');
     expect(findings).toHaveLength(1);
     expect(findings[0].code).toBe('STRUCTURAL_UNBALANCED_DELIMITER');
-    expect(findings[0].blockName).toBe('heading');
+    // Bare delimiter names (as written by core blocks, e.g. "wp:heading" with
+    // no namespace) are normalized to "core/<name>" in the finding, to match
+    // the namespacing BLOCK_INVALID findings carry from block-runner.
+    expect(findings[0].blockName).toBe('core/heading');
   });
 
   it('returns STRUCTURAL_MISMATCHED_CLOSER for out-of-order closers', () => {
@@ -53,6 +66,14 @@ describe('runStructuralLayer', () => {
     );
     const codes = findings.map((f) => f.code);
     expect(codes).toEqual(['STRUCTURAL_MISMATCHED_CLOSER', 'STRUCTURAL_MISMATCHED_CLOSER']);
+    expect(findings.map((f) => f.blockName)).toEqual(['core/group', 'core/paragraph']);
+  });
+
+  it('does not alter an already-namespaced block name in a finding', () => {
+    const findings = runStructuralLayer('<!-- wp:my-plugin/card -->\n<p>x</p>');
+    expect(findings).toHaveLength(1);
+    expect(findings[0].code).toBe('STRUCTURAL_UNBALANCED_DELIMITER');
+    expect(findings[0].blockName).toBe('my-plugin/card');
   });
 
   it('returns STRUCTURAL_INVALID_ATTRS_JSON for malformed attribute JSON', () => {
