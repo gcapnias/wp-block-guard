@@ -34,11 +34,12 @@ therefore re-pays the jsdom + `@wordpress/*` boot every time. It does not genera
 Called in-process, the boot is a one-time cost inside the *first* call and every call after
 it is cheap — measured at 8.8s for the first `validate()`, then 11-36ms per subsequent
 `validate()` or `canonicalize()`. Per-block correction across a whole file is therefore
-fractions of a second on top of the validation already being performed, **provided the
-adapter calls block-runner as a library instead of spawning it.**
+fractions of a second on top of the validation already being performed.
 
-So the cost objection is conditional on adapter shape, not inherent. Do not cite it as a
-reason to refuse this field.
+That is no longer conditional: Layer 2 now calls block-runner in-process, so the cheap
+path is the one in effect — see
+`docs/adr/0004-in-process-block-runner-invocation.md`. **Cost is not a reason to refuse
+this field.** What remains is the correctness question above, tracked as its own spike.
 
 ## On `save()` being JavaScript-only
 

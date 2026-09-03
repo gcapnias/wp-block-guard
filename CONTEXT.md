@@ -77,7 +77,15 @@ distinct from Layer 0/1 checks).
 **Canonicalization**:
 The rewrite of block markup into the exact form a block's `save()` function would
 render — what `--fix` requests. Whole-document and best-effort: it also reformats blocks
-that were already valid, and cannot repair markup carrying anything `save()` would never
-emit.
+that were already valid, and repairs only near-miss markup.
 _Avoid_: Fix (ambiguous — a finding's `fix` field is advisory prose written for a human,
 not this operation), autofix, repair.
+
+**Near-miss markup**:
+Invalid markup that differs from its `save()` output only in ways canonicalization can
+mechanically correct — attribute order, generated classes, whitespace. Distinct from
+markup carrying something `save()` would never emit (an `aria-hidden` attribute on a
+`core/group`, say), which no canonicalization can repair and which `--fix` therefore
+leaves standing.
+_Avoid_: Minor invalidity, cosmetic difference (both obscure the line that actually
+matters — whether a correction exists at all).
