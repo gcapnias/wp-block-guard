@@ -150,11 +150,11 @@ proven correct until both items below are checked off._
       finding codes, multi-file aggregation, glob support, exit codes 0/1/2) all passed.
       Found 3 real bugs and 1 performance problem — see [Known issues](#known-issues)
       below; the 3 correctness bugs have since been fixed and covered by regression tests
-      (see [`TESTS.md`](TESTS.md)).
+      (see [`tests/README.md`](tests/README.md)).
 - [x] **Automated vitest suite** against fixtures in `tests/fixtures/wp-block-guard/`,
       covering the pipeline end-to-end plus unit tests for the pure Layer 0/Layer 1
-      functions — complete, 43 tests passing. Full breakdown, fixture-by-fixture coverage,
-      and the bug fixes it verifies: see [`TESTS.md`](TESTS.md).
+      functions — complete, 43 tests passing. Full breakdown, fixture-by-fixture coverage:
+      see [`tests/README.md`](tests/README.md).
 
 ## Known issues
 
@@ -162,8 +162,8 @@ Found by manual smoke testing on 2026-09-03 (Node install: 350 packages, 0
 vulnerabilities, clean `npm install`).
 
 Items 1–3 below (found by manual smoke testing) have since been **fixed** and are covered
-by regression tests in the automated vitest suite — see [`TESTS.md`](TESTS.md) for root
-cause, the exact change, and the test that proves each fix:
+by regression tests in the automated vitest suite — see [`tests/README.md`](tests/README.md)
+for test coverage:
 
 - ~~`--fix` reports stale pre-fix results.~~ Fixed in `src/pipeline.js`: the pipeline now
   re-validates the fixed content before building the returned result.
