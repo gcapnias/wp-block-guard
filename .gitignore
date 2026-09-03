@@ -155,3 +155,12 @@ thumb
 sketch
 
 # End of https://www.toptal.com/developers/gitignore/api/node,react
+
+### Project-specific scratch space ###
+# .scratch/ is a temporary workspace for ad-hoc operations; nothing in it is tracked.
+.scratch/*
+!.scratch/.gitkeep
+
+# .firecrawl/ holds output from the firecrawl agent; nothing in it is tracked.
+.firecrawl/*
+!.firecrawl/.gitkeep
