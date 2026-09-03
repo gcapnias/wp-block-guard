@@ -155,3 +155,6 @@ thumb
 sketch
 
 # End of https://www.toptal.com/developers/gitignore/api/node,react
+
+# Compiled standalone executable produced by `npm run compile` (bun build --compile)
+bin/*.exe
