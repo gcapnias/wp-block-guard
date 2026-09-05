@@ -1,6 +1,6 @@
 # Findings do not carry corrected markup
 
-Status: accepted — cost rationale amended 2026-09-04
+Status: accepted — cost rationale amended 2026-09-04; isolation blocker resolved 2026-09-05
 
 We deliberately do not add a `match` field holding the corrected markup for a flagged
 block, even though it is the obvious companion to `search`. The reasons are correctness
@@ -20,9 +20,21 @@ cheaper-looking routes all fail in ways that are not apparent from the code:
   block changed" does not mean "this block was invalid".
 
 The route that remains open is extracting each block and canonicalizing it alone. Its
-blocker is correctness, not speed: it is unverified whether a block validated in isolation
-gets the same verdict as in context, and that is most doubtful for deeply nested blocks
-whose parents are also invalid. Settle that before reopening this.
+blocker was correctness, not speed: whether a block validated in isolation gets the same
+verdict as in context, most doubtfully for deeply nested blocks whose parents are also
+invalid.
+
+**That is now settled: it does** — see
+`handoff/2026-09-05-block-isolation-verdict-spike.md` (wpbg-4n7). Not by fixture luck but
+by construction: `validateBlock` compares `getSaveContent(blockType, block.attributes)`
+against `block.originalContent`, and `save()` is invoked with no block context, so nothing
+outside a block's own delimiter span feeds its validation. Extraction does not need to
+carry the parent's delimiters, so the overlapping-span problem does not arise. `wpbg-x8v`
+is reopened accordingly.
+
+Two obstacles survive the spike and are what any `match` field must answer to:
+canonicalization decodes HTML entities, so it is not byte-preserving; and blocks with no
+`save()`-compatible correction stay invalid, per the Consequence section below.
 
 ## Cost is not the reason (amended)
 
@@ -39,7 +51,11 @@ fractions of a second on top of the validation already being performed.
 That is no longer conditional: Layer 2 now calls block-runner in-process, so the cheap
 path is the one in effect — see
 `docs/adr/0004-in-process-block-runner-invocation.md`. **Cost is not a reason to refuse
-this field.** What remains is the correctness question above, tracked as its own spike.
+this field.** The correctness question that remained has since been answered in the
+affirmative — see above.
+
+Re-measured per-block during that spike: 8 isolated `validate()` calls totalled 128ms
+(median 9ms), and the two repairable blocks canonicalized alone in 12ms and 34ms.
 
 ## On `save()` being JavaScript-only
 
