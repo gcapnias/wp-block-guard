@@ -18,7 +18,9 @@ br version
 br init
 ```
 
-Issue IDs use the `wpbg` prefix (e.g. `wpbg-1`), set via `br config set id.prefix wpbg`.
+Issue IDs use the `wpbg` prefix (e.g. `wpbg-1`), set via `br config set issue_prefix wpbg`.
+The canonical key is `issue_prefix` (aliases: `issue-prefix`, `prefix`) — confirm with
+`br config schema`. There is no `id.prefix` key; setting one writes config `br` ignores.
 
 ## Conventions
 
