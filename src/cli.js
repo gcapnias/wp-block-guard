@@ -116,6 +116,7 @@ export async function main(argv) {
             file,
             line: 1,
             message: `Unexpected error while validating this file: ${err.message}`,
+            search: null,
             fix: 'Check that the file is readable and re-run.',
           },
         ],

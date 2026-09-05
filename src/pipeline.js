@@ -13,12 +13,19 @@ import { resolveItemLines } from './block-locator.js';
  * Falls back to block-runner's own line wherever the mapping is not certain,
  * so this is never worse than reporting nothing.
  *
+ * `search` is sliced from the same re-derived span as `line`, out of
+ * `sourceContent` rather than `content` so that a PHP-masked body never
+ * reaches the output. It is `null` on the fallback path: a position we do not
+ * trust must not be turned into text to find and replace
+ * (`docs/adr/0002-search-is-byte-exact-or-absent.md`).
+ *
  * @param {Array<object>} items
  * @param {string} content the markup handed to block-runner
+ * @param {string} sourceContent the same markup before PHP masking, to slice from
  * @param {string} filePath
  * @param {number} headerLines lines consumed by a stripped PHP header
  */
-async function findingsForItems(items, content, filePath, headerLines) {
+async function findingsForItems(items, content, sourceContent, filePath, headerLines) {
   const resolved = await resolveItemLines({ content, items, validateMarkup });
 
   return items.map((item, index) => {
@@ -31,6 +38,7 @@ async function findingsForItems(items, content, filePath, headerLines) {
       line: line == null ? undefined : line + headerLines,
       blockName: item.block,
       detail: item.reason,
+      search: resolved[index] ? sourceContent.slice(resolved[index].start, resolved[index].end) : null,
     });
   });
 }
@@ -51,6 +59,11 @@ export async function validateFile(filePath, options = {}) {
   let header = '';
   let headerLines = 0;
   let body = raw;
+  // The same content before PHP masking. Masking blanks PHP to spaces, so a
+  // `search` sliced from `body` would not be byte-exact where a fragment sits
+  // inside markup we report on — a delimiter comment's attribute JSON, say.
+  // Masking is length-preserving, so one set of offsets indexes both.
+  let unmaskedBody = raw;
   let hasEmbeddedPhp = false;
 
   // --- Layer 0: PHP fragment extraction and flagging ---
@@ -59,9 +72,14 @@ export async function validateFile(filePath, options = {}) {
     header = extracted.header || '';
     headerLines = extracted.headerLines;
     body = extracted.body;
+    unmaskedBody = extracted.body;
 
     if (header) {
-      findings.push(makeFinding('PHP_HEADER_STRIPPED', { file: filePath, line: 1 }));
+      findings.push(
+        // The header text itself, without the blank lines the extraction
+        // regex also consumed.
+        makeFinding('PHP_HEADER_STRIPPED', { file: filePath, line: 1, search: header.replace(/\s+$/, '') })
+      );
     }
 
     const embedded = scanForEmbeddedPhp(body);
@@ -72,6 +90,7 @@ export async function validateFile(filePath, options = {}) {
           makeFinding('PHP_INTERPOLATION_UNCHECKED', {
             file: filePath,
             line: occurrence.line + headerLines,
+            search: occurrence.text,
           })
         );
       }
@@ -88,6 +107,10 @@ export async function validateFile(filePath, options = {}) {
         line: sf.line + headerLines,
         blockName: sf.blockName,
         detail: sf.detail,
+        // Sliced from the unmasked body: the structural layer tokenizes the
+        // masked one, but the offsets are shared and the output must not carry
+        // blanked-out PHP.
+        search: sf.start == null ? null : unmaskedBody.slice(sf.start, sf.end),
       })
     );
   }
@@ -114,7 +137,7 @@ export async function validateFile(filePath, options = {}) {
         })
       );
     } else {
-      findings.push(...(await findingsForItems(result.data.items || [], body, filePath, headerLines)));
+      findings.push(...(await findingsForItems(result.data.items || [], body, unmaskedBody, filePath, headerLines)));
     }
   }
 
@@ -161,7 +184,11 @@ export async function validateFile(filePath, options = {}) {
             })
           );
         } else {
-          findings.push(...(await findingsForItems(revalidated.data.items || [], body, filePath, headerLines)));
+          // No masking on this path — --fix is skipped outright for a file with
+          // embedded PHP — so the rewritten body is its own unmasked source.
+          findings.push(
+            ...(await findingsForItems(revalidated.data.items || [], body, body, filePath, headerLines))
+          );
         }
       } else {
         fixSkippedReason = 'block-runner "fix" did not produce output.';

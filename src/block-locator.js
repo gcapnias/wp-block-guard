@@ -46,31 +46,52 @@ function shallowMarkup(content, node) {
 }
 
 /**
- * The line a finding should point at: the first line of the markup at fault.
+ * The span of the markup at fault: the element inside the delimiters, with
+ * surrounding whitespace trimmed off both ends.
  *
- * For a block that is invalid, the text needing correction is the element
- * inside the delimiters, not the delimiter comment — the delimiter carries the
- * attributes block-runner considers correct. See
- * `docs/adr/0005-finding-line-points-at-the-markup-at-fault.md`.
+ * For a block that is invalid, the text needing correction is that element,
+ * not the delimiter comment — the delimiter carries the attributes
+ * block-runner considers correct, and editing it is usually the wrong repair.
+ * See `docs/adr/0005-finding-line-points-at-the-markup-at-fault.md`.
+ *
+ * A self-closing block, and a block whose inner content is entirely
+ * whitespace, have no element to point at; the whole block is the span.
+ *
+ * The span is contiguous in the source, so slicing it yields text a consumer
+ * can find verbatim in the file. That is why it is the block's inner content
+ * and not `shallowMarkup()` above, which removes children and so describes
+ * text that appears nowhere.
  *
  * @param {string} content
  * @param {object} node
- * @returns {number}
+ * @returns {{ start: number, end: number }}
  */
-function markupLine(content, node) {
-  if (node.innerStart == null) return node.line; // self-closing: the delimiter is all there is
-  let i = node.innerStart;
-  while (i < node.end && /\s/.test(content[i])) i++;
-  return i < node.end ? lineAt(content, i) : node.line;
+function markupSpan(content, node) {
+  if (node.innerStart == null || node.innerEnd == null) return { start: node.start, end: node.end };
+  let start = node.innerStart;
+  let end = node.innerEnd;
+  while (start < end && /\s/.test(content[start])) start++;
+  while (end > start && /\s/.test(content[end - 1])) end--;
+  return start < end ? { start, end } : { start: node.start, end: node.end };
 }
 
 /**
- * Work out which source line each of block-runner's report items belongs to.
+ * Work out which source position each of block-runner's report items belongs to.
  *
- * Returns an array parallel to `items`. An entry is `null` wherever the
- * mapping could not be established with certainty — the caller is expected to
- * fall back to block-runner's own `source.htmlLine` rather than drop the line,
- * so an unresolvable file is no worse off than before this module existed.
+ * Returns an array parallel to `items`: the `line` of the markup at fault and
+ * the byte offsets bounding it, which a caller holding the original content
+ * can slice for the finding's `search` field. Offsets rather than text,
+ * because the content handed to block-runner may be the PHP-masked body while
+ * `search` must come from the unmasked one — masking is length-preserving, so
+ * the offsets are valid in both.
+ *
+ * An entry is `null` wherever the mapping could not be established with
+ * certainty. The caller is expected to fall back to block-runner's own
+ * `source.htmlLine` rather than drop the line, so an unresolvable file is no
+ * worse off than before this module existed. There is deliberately no
+ * equivalent fallback for `search`: text sliced from a position that may name
+ * a different block is worse than no text at all
+ * (`docs/adr/0002-search-is-byte-exact-or-absent.md`).
  *
  * Only ambiguous block names cost a validation call: a name whose candidate
  * count already equals its item count has a forced mapping, and a name
@@ -80,7 +101,7 @@ function markupLine(content, node) {
  * @param {string} params.content the markup exactly as handed to block-runner
  * @param {Array<{ block?: string, status?: string }>} params.items report items
  * @param {(markup: string) => Promise<{ ok: boolean, data: object|null }>} params.validateMarkup
- * @returns {Promise<Array<{ line: number }|null>>}
+ * @returns {Promise<Array<{ line: number, start: number, end: number }|null>>}
  */
 export async function resolveItemLines({ content, items, validateMarkup }) {
   const unresolved = items.map(() => null);
@@ -127,5 +148,8 @@ export async function resolveItemLines({ content, items, validateMarkup }) {
     if (ordered[i].blockName !== items[i].block) return unresolved;
   }
 
-  return ordered.map((node) => ({ line: markupLine(content, node) }));
+  return ordered.map((node) => {
+    const span = markupSpan(content, node);
+    return { line: lineAt(content, span.start), start: span.start, end: span.end };
+  });
 }

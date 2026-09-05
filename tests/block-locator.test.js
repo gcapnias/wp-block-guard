@@ -21,6 +21,11 @@ const stub = (isInvalid = (markup) => markup.includes('BAD')) => {
 
 const item = (block) => ({ block, status: 'invalid', reason: 'r', source: { htmlLine: 1 } });
 
+// Resolved entries carry byte offsets; render them as the text they select, so
+// an assertion says what a consumer would actually get to search for.
+const sliced = (content, resolved) =>
+  resolved.map((r) => (r === null ? null : { line: r.line, text: content.slice(r.start, r.end) }));
+
 const TWO_HEADINGS =
   '<!-- wp:heading -->\n' + //      line 1, delimiter
   '<h2>fine</h2>\n' + //            line 2
@@ -43,7 +48,7 @@ describe('resolveItemLines', () => {
       validateMarkup,
     });
 
-    expect(resolved).toEqual([{ line: 5 }]);
+    expect(sliced(TWO_HEADINGS, resolved)).toEqual([{ line: 5, text: '<h2>BAD</h2>' }]);
     expect(calls).toHaveLength(2); // ambiguous name: both candidates asked
   });
 
@@ -55,7 +60,10 @@ describe('resolveItemLines', () => {
       validateMarkup,
     });
 
-    expect(resolved).toEqual([{ line: 2 }, { line: 5 }]);
+    expect(sliced(TWO_HEADINGS, resolved)).toEqual([
+      { line: 2, text: '<h2>fine</h2>' },
+      { line: 5, text: '<h2>BAD</h2>' },
+    ]);
     expect(calls).toHaveLength(0); // nothing ambiguous, so nothing to ask
   });
 
@@ -117,6 +125,53 @@ describe('resolveItemLines', () => {
       items: [item('core/post-title')],
       validateMarkup,
     });
-    expect(resolved).toEqual([{ line: 4 }]);
+    expect(sliced(content, resolved)).toEqual([{ line: 4, text: '<!-- wp:post-title /-->' }]);
+  });
+
+  it('spans the element at fault, not the delimiters around it', async () => {
+    const { validateMarkup } = stub();
+    const content = '<!-- wp:heading {"level":2} -->\n  <h2>BAD</h2>\n<!-- /wp:heading -->\n';
+    const resolved = await resolveItemLines({
+      content,
+      items: [item('core/heading')],
+      validateMarkup,
+    });
+    // Leading indentation and the trailing newline are trimmed; the delimiter,
+    // which carries the attributes save() is held to, is not part of the span.
+    expect(sliced(content, resolved)).toEqual([{ line: 2, text: '<h2>BAD</h2>' }]);
+  });
+
+  it('spans a nested block whole, children included, so the text is contiguous', async () => {
+    const content =
+      '<!-- wp:group -->\n' +
+      '<div class="wp-block-group">BAD\n' +
+      '<!-- wp:paragraph -->\n' +
+      '<p>inner</p>\n' +
+      '<!-- /wp:paragraph -->\n' +
+      '</div>\n' +
+      '<!-- /wp:group -->';
+    const { validateMarkup } = stub((m) => m.includes('BAD'));
+    const resolved = await resolveItemLines({
+      content,
+      items: [item('core/group')],
+      validateMarkup,
+    });
+    const [entry] = sliced(content, resolved);
+    expect(entry.line).toBe(2);
+    // Whatever the span is, it must be findable verbatim in the source — which
+    // rules out the children-removed form used for validation.
+    expect(content).toContain(entry.text);
+    expect(entry.text).toContain('<!-- wp:paragraph -->');
+  });
+
+  it('falls back to the whole block when there is no inner markup to point at', async () => {
+    const { validateMarkup } = stub((m) => m.includes('spacer'));
+    const content = '<!-- wp:spacer -->\n\n<!-- /wp:spacer -->';
+    const resolved = await resolveItemLines({
+      content,
+      items: [item('core/spacer')],
+      validateMarkup,
+    });
+    expect(sliced(content, resolved)).toEqual([{ line: 1, text: content }]);
   });
 });

@@ -92,7 +92,11 @@ describe('validateFile — PHP fragments', () => {
     const result = await validateFile(fx('pattern-with-header.php'));
     expect(result.ok).toBe(true);
     expect(result.findings).toHaveLength(1);
-    expect(result.findings[0]).toMatchObject({ code: 'PHP_HEADER_STRIPPED', severity: 'info' });
+    expect(result.findings[0]).toMatchObject({
+      code: 'PHP_HEADER_STRIPPED',
+      severity: 'info',
+      search: '<?php /* Title: Example */ ?>',
+    });
   });
 
   it('flags embedded PHP interpolation once (not once per token) and still validates the masked remainder', async () => {
@@ -103,6 +107,10 @@ describe('validateFile — PHP fragments', () => {
     // used to produce two identical PHP_INTERPOLATION_UNCHECKED findings
     // (the opening and closing tokens counted as separate occurrences).
     expect(codes.filter((c) => c === 'PHP_INTERPOLATION_UNCHECKED')).toHaveLength(1);
+    // search is the whole fragment, opener to closer — not just the "<?php" token.
+    expect(result.findings.find((f) => f.code === 'PHP_INTERPOLATION_UNCHECKED').search).toBe(
+      '<?php echo esc_html( $x ); ?>'
+    );
     // No structural or block-runner errors should leak through from the masked region.
     expect(codes).not.toContain('STRUCTURAL_UNBALANCED_DELIMITER');
     expect(codes).not.toContain('BLOCK_INVALID');
@@ -297,5 +305,91 @@ describe('validateFile — positions after --fix', () => {
       expect(lines[finding.line - 1].trim().startsWith('<!--')).toBe(false);
       expect(lines[finding.line - 1]).toContain('aria-hidden');
     }
+  }, 45000);
+});
+
+describe('validateFile — search (wpbg-qlm)', () => {
+  const tmpFiles = [];
+
+  afterAll(async () => {
+    await Promise.all(tmpFiles.map((f) => fs.rm(f, { force: true })));
+  });
+
+  // The contract is byte-exactness: whatever search says, a consumer must be
+  // able to find it verbatim in the file it was reported against.
+  const expectFindableIn = (raw, findings) => {
+    for (const finding of findings) {
+      if (finding.search === null) continue;
+      expect(raw).toContain(finding.search);
+    }
+  };
+
+  it('gives every finding a search key, populated or explicitly null', async () => {
+    const result = await validateFile(fx('unbalanced-delimiter.html'));
+    expect(result.findings.length).toBeGreaterThan(1);
+    for (const finding of result.findings) {
+      expect(finding).toHaveProperty('search');
+    }
+    // BLOCK_RUNNER_SKIPPED is about the file, not a span of it.
+    expect(result.findings.find((f) => f.code === 'BLOCK_RUNNER_SKIPPED').search).toBeNull();
+  });
+
+  it('points a structural finding at the delimiter comment, which is the defect', async () => {
+    const result = await validateFile(fx('invalid-attrs-json.html'));
+    const finding = result.findings.find((f) => f.code === 'STRUCTURAL_INVALID_ATTRS_JSON');
+    expect(finding.search).toBe('<!-- wp:heading {level:2} -->');
+    expectFindableIn(await fs.readFile(fx('invalid-attrs-json.html'), 'utf8'), result.findings);
+  });
+
+  it('points an unbalanced-delimiter finding at the opener that is never closed', async () => {
+    const file = fx('unbalanced-delimiter.html');
+    const result = await validateFile(file);
+    const finding = result.findings.find((f) => f.code === 'STRUCTURAL_UNBALANCED_DELIMITER');
+    expect(finding.search.startsWith('<!-- wp:')).toBe(true);
+    expectFindableIn(await fs.readFile(file, 'utf8'), result.findings);
+  });
+
+  it('points a BLOCK_INVALID finding at the element at fault, not its delimiter', async () => {
+    const result = await validateFile(fx('invalid-heading-missing-class.html'));
+    const finding = result.findings.find((f) => f.code === 'BLOCK_INVALID');
+    // The delimiter carries the attributes save() is held to; editing it is the
+    // wrong repair (docs/adr/0005-finding-line-points-at-the-markup-at-fault.md).
+    expect(finding.search).toBe('<h2>Hello World</h2>');
+  });
+
+  it('picks the right occurrence when a valid block of the same name precedes it', async () => {
+    const file = fx('valid-then-invalid-same-name.html');
+    const result = await validateFile(file);
+    const invalid = result.findings.filter((f) => f.code === 'BLOCK_INVALID');
+    expect(invalid.map((f) => f.search)).toEqual([
+      '<h2>Invalid heading second</h2>',
+      '<p>Invalid paragraph second</p>',
+    ]);
+    expectFindableIn(await fs.readFile(file, 'utf8'), result.findings);
+  });
+
+  it('slices from the pre-mask body, so PHP inside a delimiter survives into search', async () => {
+    // The only shape where slicing from the masked body differs from the
+    // original: maskEmbeddedPhp blanks the interpolation to spaces, and the
+    // structural layer tokenizes that masked text.
+    const file = fx('interpolated-delimiter-attrs.php');
+    const result = await validateFile(file);
+    const finding = result.findings.find((f) => f.code === 'STRUCTURAL_INVALID_ATTRS_JSON');
+    expect(finding.search).toBe('<!-- wp:heading {"level":<?php echo 2; ?>} -->');
+    expect(finding.search).not.toMatch(/  /); // no blanked-out run where the PHP was
+    expectFindableIn(await fs.readFile(file, 'utf8'), result.findings);
+  });
+
+  it('slices a post-fix finding from the rewritten file, not the original', async () => {
+    const tmpFile = path.join(os.tmpdir(), `wp-block-guard-search-residual-${Date.now()}.html`);
+    tmpFiles.push(tmpFile);
+    await fs.writeFile(tmpFile, await fs.readFile(fx('unfixable-extra-attribute.html'), 'utf8'), 'utf8');
+
+    const result = await validateFile(tmpFile, { fix: true });
+    const residual = result.findings.filter((f) => f.code === 'BLOCK_INVALID');
+    expect(residual.length).toBeGreaterThan(0);
+    // --fix reflows the whole document, so text sliced out of the pre-fix
+    // content would not be found in what is now on disk.
+    expectFindableIn(await fs.readFile(tmpFile, 'utf8'), result.findings);
   }, 45000);
 });

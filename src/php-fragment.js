@@ -36,8 +36,12 @@ export function extractPhpHeader(content) {
  * leading header, if any, has already been removed by extractPhpHeader). Each
  * "<?php ... ?>" / "<?= ... ?>" block is reported once, at its opening token
  * — not once per token (opener and closer are part of the same occurrence).
+ *
+ * Each occurrence also carries `text`: the whole matched `<?...?>` fragment,
+ * which is what a finding's `search` needs. `token` stays the opening tag
+ * alone — it is part of this function's existing contract.
  * @param {string} body
- * @returns {Array<{ index: number, line: number, token: string }>}
+ * @returns {Array<{ index: number, line: number, token: string, text: string }>}
  */
 export function scanForEmbeddedPhp(body) {
   const occurrences = [];
@@ -48,7 +52,12 @@ export function scanForEmbeddedPhp(body) {
   while ((match = PHP_TAG_BLOCK_RE.exec(body))) {
     const line = body.slice(0, match.index).split('\n').length;
     const openerMatch = /^<\?(?:php\b|=)?/.exec(match[0]);
-    occurrences.push({ index: match.index, line, token: openerMatch ? openerMatch[0] : match[0] });
+    occurrences.push({
+      index: match.index,
+      line,
+      token: openerMatch ? openerMatch[0] : match[0],
+      text: match[0],
+    });
     covered.push([match.index, match.index + match[0].length]);
   }
 
@@ -62,7 +71,9 @@ export function scanForEmbeddedPhp(body) {
     const insideCovered = covered.some(([start, end]) => openerMatch2.index >= start && openerMatch2.index < end);
     if (insideCovered) continue;
     const line = body.slice(0, openerMatch2.index).split('\n').length;
-    occurrences.push({ index: openerMatch2.index, line, token: openerMatch2[0] });
+    // No closer before EOF, so there is no fragment to point at beyond the
+    // opener itself.
+    occurrences.push({ index: openerMatch2.index, line, token: openerMatch2[0], text: openerMatch2[0] });
   }
 
   occurrences.sort((a, b) => a.index - b.index);

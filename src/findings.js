@@ -85,7 +85,10 @@ export function describeCode(code) {
 
 /**
  * @param {string} code one of FINDING_CODES
- * @param {{file?: string, line?: number, blockName?: string, detail?: string}} overrides
+ * @param {{file?: string, line?: number, blockName?: string, detail?: string, search?: string|null}} overrides
+ *   `search` is the byte-exact source text the finding is about, so a consumer
+ *   can find-and-replace it. It is byte-exact or absent, never a best-effort
+ *   approximation — see `docs/adr/0002-search-is-byte-exact-or-absent.md`.
  */
 export function makeFinding(code, overrides = {}) {
   const def = REGISTRY[code];
@@ -99,6 +102,7 @@ export function makeFinding(code, overrides = {}) {
     line: overrides.line,
     blockName: overrides.blockName,
     message: def.message(overrides),
+    search: overrides.search == null ? null : overrides.search,
     fix: def.fix(overrides),
   };
 }

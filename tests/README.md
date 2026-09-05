@@ -86,6 +86,7 @@ Each fixture's expected findings were verified empirically by running
 | `pattern-with-interpolation.php` | Leading header + `core/paragraph` block with embedded `<?php echo esc_html($x); ?>` mid-markup | `PHP_HEADER_STRIPPED`, `PHP_INTERPOLATION_UNCHECKED` (exactly one); no crash in structural/block-runner layers on the masked remainder |
 | `two-invalid-headings.html` | Two separate `core/heading` blocks, each missing `class="wp-block-heading"` | `BLOCK_INVALID` (x2) |
 | `deeply-nested-mismatched-closer.html` | `wp:group > wp:columns > wp:column` (3 levels), with `/wp:columns` and `/wp:column` closed out of order | `STRUCTURAL_MISMATCHED_CLOSER` (x2), `BLOCK_RUNNER_SKIPPED` |
+| `interpolated-delimiter-attrs.php` | `<?php ?>` interpolated **inside a delimiter comment's attribute JSON** — the only shape where slicing `search` from the PHP-masked body differs from the original | `PHP_HEADER_STRIPPED`, `PHP_INTERPOLATION_UNCHECKED`, `STRUCTURAL_INVALID_ATTRS_JSON` (the masked JSON no longer parses), `BLOCK_RUNNER_SKIPPED` |
 
 When adding a fixture, run it through the CLI with `--json` first and copy the actual
 output into the test assertion — do not guess expected findings.

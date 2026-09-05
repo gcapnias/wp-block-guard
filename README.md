@@ -146,9 +146,10 @@ this tool.
 
 ## Finding codes
 
-Every finding has a stable `code`, a `severity` (`error` | `warning` | `info`), and a
-`fix` string an agent can act on directly. Full table and explanation:
-run `wp-block-guard --help`, or see the `REGISTRY` in [`src/findings.js`](src/findings.js).
+Every finding has a stable `code`, a `severity` (`error` | `warning` | `info`), a
+`fix` string an agent can act on directly, and `search` — the byte-exact source text at
+fault, or `null` where no single span can be identified with certainty. Full table and
+explanation: run `wp-block-guard --help`, or see the `REGISTRY` in [`src/findings.js`](src/findings.js).
 
 | Code | Severity | Meaning |
 | --- | --- | --- |

@@ -83,6 +83,7 @@ JSON OUTPUT SHAPE (--json)
             "line": 12,                    // 1-based, may be undefined
             "blockName": "core/heading",   // present when the finding is block-scoped
             "message": "human-readable explanation of what is wrong",
+            "search": "<h2>Hello</h2>",         // byte-exact source text at fault, or null
             "fix": "human/agent-readable suggestion of what to do about it, or null"
           }
         ]
@@ -130,6 +131,9 @@ AGENT WORKFLOW (recommended loop)
   1. Generate or edit block markup.
   2. wp-block-guard <file> --json
   3. If ok=false: read each finding's "fix" text, apply the ones you can.
+     "search", where it is not null, is the exact text to find in the file —
+     use it as the search side of a find-and-replace instead of re-deriving
+     the span from "line".
   4. For remaining BLOCK_INVALID-only findings, try wp-block-guard <file> --fix
      then re-run step 2 to confirm.
   5. Only publish to WordPress once ok=true.

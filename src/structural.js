@@ -181,8 +181,18 @@ export function qualifyBlockName(name) {
 }
 
 /**
+ * Each finding carries the `start`/`end` byte offsets of the delimiter token
+ * it is about, so a caller holding the original content can slice the exact
+ * delimiter text for the finding's `search` field. This function is
+ * deliberately not given the content itself: it is exported and tested against
+ * tokens alone, and `src/pipeline.js` — which must slice from the *pre-mask*
+ * body, not the masked one the tokenizer saw — is the only place that can do
+ * the slicing correctly.
+ *
+ * `STRUCTURAL_NO_BLOCKS` has no token and so no span.
+ *
  * @param {ReturnType<typeof tokenizeDelimiters>} tokens
- * @returns {Array<{ code: string, line: number, blockName?: string, detail?: string }>}
+ * @returns {Array<{ code: string, line: number, blockName?: string, detail?: string, start?: number, end?: number }>}
  */
 export function checkStructuralBalance(tokens) {
   const findings = [];
@@ -195,6 +205,8 @@ export function checkStructuralBalance(tokens) {
         code: 'STRUCTURAL_INVALID_ATTRS_JSON',
         line: token.line,
         blockName: name,
+        start: token.start,
+        end: token.end,
       });
     }
 
@@ -209,6 +221,8 @@ export function checkStructuralBalance(tokens) {
           line: token.line,
           blockName: name,
           detail: `Closing comment for "${name}" found with no matching opener.`,
+          start: token.start,
+          end: token.end,
         });
       } else if (top.blockName !== token.blockName) {
         const topName = qualifyBlockName(top.blockName);
@@ -217,6 +231,8 @@ export function checkStructuralBalance(tokens) {
           line: token.line,
           blockName: name,
           detail: `Closing comment for "${name}" does not match innermost open block "${topName}" (opened at line ${top.line}).`,
+          start: token.start,
+          end: token.end,
         });
         stack.pop(); // best-effort recovery so one mistake doesn't cascade into every remaining token
       } else {
@@ -234,6 +250,8 @@ export function checkStructuralBalance(tokens) {
       line: unclosed.line,
       blockName: name,
       detail: `Block "${name}" opened at line ${unclosed.line} is never closed.`,
+      start: unclosed.start,
+      end: unclosed.end,
     });
   }
 
@@ -267,11 +285,11 @@ export function runStructuralLayer(content) {
  * opener that never closes simply keeps `end: null`, and callers drop it.
  *
  * `start`/`end` bound the whole block including both delimiters; `innerStart`
- * is the offset just past the opening delimiter, and is `null` for a
+ * and `innerEnd` bound the content between them, and are both `null` for a
  * self-closing block, which has no inner content.
  *
  * @param {string} content
- * @returns {Array<{ blockName: string, line: number, start: number, innerStart: number|null, end: number|null, children: Array }>}
+ * @returns {Array<{ blockName: string, line: number, start: number, innerStart: number|null, innerEnd: number|null, end: number|null, children: Array }>}
  *   top-level blocks, each in document order
  */
 export function buildBlockTree(content) {
@@ -287,6 +305,7 @@ export function buildBlockTree(content) {
         line: token.line,
         start: token.start,
         innerStart: null,
+        innerEnd: null,
         end: token.end,
         children: [],
       });
@@ -295,7 +314,10 @@ export function buildBlockTree(content) {
 
     if (token.closing) {
       const open = stack.pop();
-      if (open) open.end = token.end;
+      if (open) {
+        open.innerEnd = token.start;
+        open.end = token.end;
+      }
       continue;
     }
 
@@ -304,6 +326,7 @@ export function buildBlockTree(content) {
       line: token.line,
       start: token.start,
       innerStart: token.end,
+      innerEnd: null,
       end: null,
       children: [],
     };
