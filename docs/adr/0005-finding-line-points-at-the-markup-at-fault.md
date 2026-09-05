@@ -17,6 +17,10 @@ out of what is actually wrong in each case:
 So `<!-- wp:heading {"level":2} -->` on line 6 with `<h2>` on line 7 reports line 7: the
 `<h2>` is the text an operator or agent has to edit.
 
+Two shapes have no element to point at: a self-closing block, and a block whose inner
+content is entirely whitespace. For both, the block as a whole is the text the finding is
+about, so `line` is its opening delimiter's line.
+
 ## Why this needed deciding
 
 block-runner reports `source.htmlLine` per invalid block, and we passed it straight

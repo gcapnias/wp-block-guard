@@ -5,6 +5,7 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { validateFile } from '../src/index.js';
+import { makeFinding } from '../src/findings.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(__dirname, 'fixtures', 'wp-block-guard');
@@ -323,6 +324,21 @@ describe('validateFile — search (wpbg-qlm)', () => {
       expect(raw).toContain(finding.search);
     }
   };
+
+  it('places search between message and fix, which is the agent-facing JSON shape', () => {
+    // JSON.stringify preserves insertion order, so field order is part of the
+    // contract an agent reads, not just cosmetics.
+    expect(Object.keys(makeFinding('BLOCK_INVALID', { file: 'f.html', line: 2, detail: 'd' }))).toEqual([
+      'code',
+      'severity',
+      'file',
+      'line',
+      'blockName',
+      'message',
+      'search',
+      'fix',
+    ]);
+  });
 
   it('gives every finding a search key, populated or explicitly null', async () => {
     const result = await validateFile(fx('unbalanced-delimiter.html'));

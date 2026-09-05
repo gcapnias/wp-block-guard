@@ -105,6 +105,11 @@ output into the test assertion — do not guess expected findings.
   (block-runner failing to invoke, or returning unparseable output), are both untested.
   Both depend on the internals of the block-runner adapter (subprocess spawn failure,
   non-JSON stdout, the `fix` command's temp-file `--out` step failing).
+- **The hand-built `BLOCK_RUNNER_FAILURE` finding in `src/cli.js`'s per-file catch block**
+  is not asserted against. It is constructed as an object literal rather than through
+  `makeFinding()`, so its shape — including `search: null` — is kept in step by
+  inspection, not by a test. Reaching it means making `validateFile()` throw for a file
+  the CLI has already globbed successfully.
 - **`BLOCK_RUNNER_WARNING` has no fixture and is very likely unreachable** as things
   stand: the installed `block-runner` version's `validate()` function only ever
   produces `status: "invalid"` items — never `status: "warning"` — on the `validate`/

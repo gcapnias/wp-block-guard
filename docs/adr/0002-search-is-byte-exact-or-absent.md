@@ -18,11 +18,22 @@ content corruption.
   matched fragment in hand.
 - `STRUCTURAL_*` — the delimiter comment, sliced from the byte offsets
   `tokenizeDelimiters()` already computes. The delimiter *is* the defect for these codes.
-- `BLOCK_INVALID`, `BLOCK_RUNNER_WARNING` — the element inside the block's delimiters,
-  from the span `src/block-locator.js` re-derives, and `null` on that module's fallback
-  path. Never from block-runner's `source.htmlLine`.
+- `BLOCK_INVALID` — the element inside the block's delimiters, from the span
+  `src/block-locator.js` re-derives, and `null` on that module's fallback path. Never from
+  block-runner's `source.htmlLine`.
 - `BLOCK_RUNNER_SKIPPED`, `BLOCK_RUNNER_FAILURE`, `STRUCTURAL_NO_BLOCKS` — `null`. These
   are about the file, not a span of it.
+- `BLOCK_RUNNER_WARNING` — `null`, and not by accident: `resolveItemLines()` resolves
+  nothing unless *every* item it is given has `status: "invalid"`, so a warning item can
+  never be mapped to a span. It cannot currently fire from this path at all (ADR 0005),
+  but the rule holds if it ever does.
+
+**The fallback is per-file, not per-finding.** Wherever `resolveItemLines()` cannot
+establish the mapping it returns `null` for every item, so one unmappable item — a warning
+among invalids, or a block count we and block-runner disagree about — leaves `search`
+`null` for every block-runner finding in that file, not just the one at fault. That is the
+intended trade: the mapping's soundness argument is about the document as a whole, and
+partial confidence in it is not confidence.
 
 Nothing is sliced from block-runner's positions. That is what keeps this cheap: no extra
 subprocess and no dependency on its source mapping.
