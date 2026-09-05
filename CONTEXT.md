@@ -13,10 +13,19 @@ implemented in its own module and each able to short-circuit the layers after it
 _Avoid_: Stage, phase, step.
 
 **Finding**:
-A single reportable result of validation: `{code, severity, message, search, fix}`. Every
+A single reportable result of validation: `{code, severity, line, message, search, fix}`. Every
 layer emits findings; they are the only thing the CLI's JSON output and human report
 are built from.
 _Avoid_: Error (too narrow — a finding may be info/warning/error), issue, diagnostic.
+
+**line**:
+The 1-based source line a finding points at, always the first line of the text the finding
+is about — the delimiter comment for `STRUCTURAL_*` codes (where the delimiter is the
+defect), the element inside it for `BLOCK_INVALID` (where the delimiter is correct and the
+markup disagrees with it). Re-derived from our own tokenizer, never taken from
+block-runner's `source.htmlLine`, which frequently names a different, valid block — see
+`docs/adr/0005-finding-line-points-at-the-markup-at-fault.md`.
+_Avoid_: Line number (redundant), position, offset (a byte index, not a line).
 
 **search**:
 The byte-exact slice of the input file a finding points at — the text an agent would

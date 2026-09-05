@@ -3,6 +3,37 @@ import { extractPhpHeader, scanForEmbeddedPhp, maskEmbeddedPhp } from './php-fra
 import { runStructuralLayer, BLOCKING_STRUCTURAL_CODES } from './structural.js';
 import { validateMarkup, fixMarkup } from './block-runner-adapter.js';
 import { makeFinding } from './findings.js';
+import { resolveItemLines } from './block-locator.js';
+
+/**
+ * Turn block-runner's report items into findings, with positions re-derived
+ * from our own tokenizer rather than taken from `item.source.htmlLine`, which
+ * routinely names a different, valid block (see src/block-locator.js).
+ *
+ * Falls back to block-runner's own line wherever the mapping is not certain,
+ * so this is never worse than reporting nothing.
+ *
+ * @param {Array<object>} items
+ * @param {string} content the markup handed to block-runner
+ * @param {string} filePath
+ * @param {number} headerLines lines consumed by a stripped PHP header
+ */
+async function findingsForItems(items, content, filePath, headerLines) {
+  const resolved = await resolveItemLines({ content, items, validateMarkup });
+
+  return items.map((item, index) => {
+    const code = item.status === 'warning' ? 'BLOCK_RUNNER_WARNING' : 'BLOCK_INVALID';
+    const fallback = item.source && item.source.htmlLine ? item.source.htmlLine : null;
+    const line = resolved[index] ? resolved[index].line : fallback;
+
+    return makeFinding(code, {
+      file: filePath,
+      line: line == null ? undefined : line + headerLines,
+      blockName: item.block,
+      detail: item.reason,
+    });
+  });
+}
 
 /**
  * Run the full three-layer pipeline (PHP-fragment flagging, structural
@@ -83,17 +114,7 @@ export async function validateFile(filePath, options = {}) {
         })
       );
     } else {
-      for (const item of result.data.items || []) {
-        const code = item.status === 'warning' ? 'BLOCK_RUNNER_WARNING' : 'BLOCK_INVALID';
-        findings.push(
-          makeFinding(code, {
-            file: filePath,
-            line: item.source && item.source.htmlLine ? item.source.htmlLine + headerLines : undefined,
-            blockName: item.block,
-            detail: item.reason,
-          })
-        );
-      }
+      findings.push(...(await findingsForItems(result.data.items || [], body, filePath, headerLines)));
     }
   }
 
@@ -140,17 +161,7 @@ export async function validateFile(filePath, options = {}) {
             })
           );
         } else {
-          for (const item of revalidated.data.items || []) {
-            const code = item.status === 'warning' ? 'BLOCK_RUNNER_WARNING' : 'BLOCK_INVALID';
-            findings.push(
-              makeFinding(code, {
-                file: filePath,
-                line: item.source && item.source.htmlLine ? item.source.htmlLine + headerLines : undefined,
-                blockName: item.block,
-                detail: item.reason,
-              })
-            );
-          }
+          findings.push(...(await findingsForItems(revalidated.data.items || [], body, filePath, headerLines)));
         }
       } else {
         fixSkippedReason = 'block-runner "fix" did not produce output.';

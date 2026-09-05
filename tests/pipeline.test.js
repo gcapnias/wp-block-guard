@@ -227,3 +227,45 @@ describe('block-runner stderr containment', () => {
     expect(stderr).toBe('');
   }, 45000);
 });
+
+describe('validateFile — BLOCK_INVALID positions (wpbg-djb)', () => {
+  // block-runner's own source.htmlLine names a *different, valid* block whenever
+  // one of the same name precedes the invalid one: it reports lines 3 and 9 for
+  // this fixture, both of which are valid. Positions are re-derived instead —
+  // see docs/adr/0005-finding-line-points-at-the-markup-at-fault.md.
+  it('reports the invalid block, not an earlier valid block of the same name', async () => {
+    const result = await validateFile(fx('valid-then-invalid-same-name.html'));
+    const invalid = result.findings.filter((f) => f.code === 'BLOCK_INVALID');
+
+    expect(invalid).toHaveLength(2);
+    expect(invalid.map((f) => [f.blockName, f.line])).toEqual([
+      ['core/heading', 7],
+      ['core/paragraph', 13],
+    ]);
+  });
+
+  it('points line at the markup at fault, not the delimiter comment', async () => {
+    const result = await validateFile(fx('valid-then-invalid-same-name.html'));
+    const raw = await fs.readFile(fx('valid-then-invalid-same-name.html'), 'utf8');
+    const lines = raw.split('\n');
+
+    for (const finding of result.findings.filter((f) => f.code === 'BLOCK_INVALID')) {
+      const text = lines[finding.line - 1].trim();
+      expect(text.startsWith('<!--')).toBe(false);
+      expect(text.startsWith('<')).toBe(true);
+    }
+  });
+
+  it('resolves every finding in a deeply nested real-world part', async () => {
+    const file = path.join(__dirname, 'fixtures', 'mastermind-ls', 'parts', 'title.html');
+    const result = await validateFile(file);
+    const invalid = result.findings.filter((f) => f.code === 'BLOCK_INVALID');
+
+    expect(invalid.map((f) => [f.blockName, f.line])).toEqual([
+      ['core/group', 2],
+      ['core/group', 7],
+      ['core/paragraph', 9],
+      ['core/paragraph', 17],
+    ]);
+  });
+});

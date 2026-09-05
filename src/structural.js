@@ -82,7 +82,12 @@ function readBalancedJson(content, start) {
   return { raw, end: p, valid };
 }
 
-function lineOf(content, index) {
+/**
+ * 1-based line number of a byte offset.
+ * @param {string} content
+ * @param {number} index
+ */
+export function lineAt(content, index) {
   let line = 1;
   for (let i = 0; i < index; i++) {
     if (content[i] === '\n') line++;
@@ -149,7 +154,7 @@ export function tokenizeDelimiters(content) {
       attrsValid,
       start,
       end,
-      line: lineOf(content, start),
+      line: lineAt(content, start),
     });
     i = end;
   }
@@ -245,6 +250,84 @@ export function checkStructuralBalance(tokens) {
  */
 export function runStructuralLayer(content) {
   return checkStructuralBalance(tokenizeDelimiters(content));
+}
+
+/**
+ * Pair the flat delimiter list into a nested tree of blocks with byte-exact spans.
+ *
+ * `tokenizeDelimiters()` returns a flat token list and does no pairing;
+ * `checkStructuralBalance()` builds the open/close stack only to discard it.
+ * Layer 2 needs that structure kept, because block-runner's own per-block
+ * positions cannot be trusted — see
+ * `docs/adr/0005-finding-line-points-at-the-markup-at-fault.md` and
+ * `src/block-locator.js`, which re-derives positions from these spans.
+ *
+ * Malformed input is deliberately not handled here: `checkStructuralBalance()`
+ * reports it and `src/pipeline.js` skips Layer 2 entirely when it does. An
+ * opener that never closes simply keeps `end: null`, and callers drop it.
+ *
+ * `start`/`end` bound the whole block including both delimiters; `innerStart`
+ * is the offset just past the opening delimiter, and is `null` for a
+ * self-closing block, which has no inner content.
+ *
+ * @param {string} content
+ * @returns {Array<{ blockName: string, line: number, start: number, innerStart: number|null, end: number|null, children: Array }>}
+ *   top-level blocks, each in document order
+ */
+export function buildBlockTree(content) {
+  const roots = [];
+  const stack = [];
+
+  for (const token of tokenizeDelimiters(content)) {
+    const siblings = stack.length > 0 ? stack[stack.length - 1].children : roots;
+
+    if (token.selfClosing) {
+      siblings.push({
+        blockName: qualifyBlockName(token.blockName),
+        line: token.line,
+        start: token.start,
+        innerStart: null,
+        end: token.end,
+        children: [],
+      });
+      continue;
+    }
+
+    if (token.closing) {
+      const open = stack.pop();
+      if (open) open.end = token.end;
+      continue;
+    }
+
+    const node = {
+      blockName: qualifyBlockName(token.blockName),
+      line: token.line,
+      start: token.start,
+      innerStart: token.end,
+      end: null,
+      children: [],
+    };
+    siblings.push(node);
+    stack.push(node);
+  }
+
+  return roots;
+}
+
+/**
+ * Flatten a block tree to pre-order (depth-first) sequence, which for
+ * delimiter-based markup is document order — the same order block-runner's
+ * `validate` walks its own parsed blocks in.
+ *
+ * @param {ReturnType<typeof buildBlockTree>} nodes
+ * @returns {Array<object>}
+ */
+export function flattenBlockTree(nodes, out = []) {
+  for (const node of nodes) {
+    out.push(node);
+    flattenBlockTree(node.children, out);
+  }
+  return out;
 }
 
 export const BLOCKING_STRUCTURAL_CODES = [

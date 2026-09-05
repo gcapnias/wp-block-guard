@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { tokenizeDelimiters, runStructuralLayer, qualifyBlockName } from '../src/structural.js';
+import {
+  tokenizeDelimiters,
+  runStructuralLayer,
+  qualifyBlockName,
+  buildBlockTree,
+  flattenBlockTree,
+} from '../src/structural.js';
 
 describe('tokenizeDelimiters', () => {
   it('tokenizes a balanced open/close pair with JSON attrs', () => {
@@ -84,5 +90,57 @@ describe('runStructuralLayer', () => {
   it('returns no findings for balanced, valid delimiters', () => {
     const findings = runStructuralLayer('<!-- wp:heading {"level":2} -->\n<h2>Hi</h2>\n<!-- /wp:heading -->');
     expect(findings).toEqual([]);
+  });
+});
+
+describe('buildBlockTree', () => {
+  const NESTED =
+    '<!-- wp:group -->\n' +
+    '<div class="wp-block-group">\n' +
+    '<!-- wp:heading {"level":2} -->\n' +
+    '<h2>Hi</h2>\n' +
+    '<!-- /wp:heading -->\n' +
+    '</div>\n' +
+    '<!-- /wp:group -->';
+
+  it('nests a child block under its parent', () => {
+    const roots = buildBlockTree(NESTED);
+    expect(roots).toHaveLength(1);
+    expect(roots[0].blockName).toBe('core/group');
+    expect(roots[0].children).toHaveLength(1);
+    expect(roots[0].children[0].blockName).toBe('core/heading');
+  });
+
+  it('spans a block from its opening delimiter through its closing one', () => {
+    const roots = buildBlockTree(NESTED);
+    expect(NESTED.slice(roots[0].start, roots[0].end)).toBe(NESTED);
+
+    const heading = roots[0].children[0];
+    expect(NESTED.slice(heading.start, heading.end)).toBe(
+      '<!-- wp:heading {"level":2} -->\n<h2>Hi</h2>\n<!-- /wp:heading -->'
+    );
+  });
+
+  it('points innerStart just past the opening delimiter', () => {
+    const heading = buildBlockTree(NESTED)[0].children[0];
+    expect(NESTED.slice(heading.innerStart, heading.end)).toBe(
+      '\n<h2>Hi</h2>\n<!-- /wp:heading -->'
+    );
+  });
+
+  it('treats a self-closing block as a leaf with no inner content', () => {
+    const roots = buildBlockTree('<!-- wp:post-title {"level":1} /-->');
+    expect(roots).toHaveLength(1);
+    expect(roots[0]).toMatchObject({ blockName: 'core/post-title', innerStart: null, children: [] });
+  });
+
+  it('leaves end null for an opener that never closes', () => {
+    const roots = buildBlockTree('<!-- wp:heading -->\n<h2>Hi</h2>');
+    expect(roots[0].end).toBeNull();
+  });
+
+  it('flattens to document order, parents before their children', () => {
+    const names = flattenBlockTree(buildBlockTree(NESTED)).map((b) => b.blockName);
+    expect(names).toEqual(['core/group', 'core/heading']);
   });
 });
