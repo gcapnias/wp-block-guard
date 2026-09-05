@@ -269,3 +269,33 @@ describe('validateFile — BLOCK_INVALID positions (wpbg-djb)', () => {
     ]);
   });
 });
+
+describe('validateFile — positions after --fix', () => {
+  const tmpFiles = [];
+
+  afterAll(async () => {
+    await Promise.all(tmpFiles.map((f) => fs.rm(f, { force: true })));
+  });
+
+  // The post-fix re-validate resolves positions against canonicalize's output
+  // rather than the original file, so this covers the second call site in
+  // src/pipeline.js, not just the first.
+  it('locates a residual finding against the rewritten file', async () => {
+    const tmpFile = path.join(os.tmpdir(), `wp-block-guard-fix-residual-${Date.now()}.html`);
+    tmpFiles.push(tmpFile);
+    await fs.writeFile(tmpFile, await fs.readFile(fx('unfixable-extra-attribute.html'), 'utf8'), 'utf8');
+
+    const result = await validateFile(tmpFile, { fix: true });
+    const residual = result.findings.filter((f) => f.code === 'BLOCK_INVALID');
+    expect(residual.length).toBeGreaterThan(0);
+
+    const lines = (await fs.readFile(tmpFile, 'utf8')).split('\n');
+    for (const finding of residual) {
+      expect(finding.line).toBeGreaterThan(0);
+      expect(finding.line).toBeLessThanOrEqual(lines.length);
+      // the markup at fault, not the delimiter comment above it
+      expect(lines[finding.line - 1].trim().startsWith('<!--')).toBe(false);
+      expect(lines[finding.line - 1]).toContain('aria-hidden');
+    }
+  }, 45000);
+});
