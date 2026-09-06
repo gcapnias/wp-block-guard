@@ -85,8 +85,8 @@ distinct from Layer 0/1 checks).
 
 **Canonicalization**:
 The rewrite of block markup into the exact form a block's `save()` function would
-render — what `--fix` requests. Whole-document and best-effort: it also reformats blocks
-that were already valid, and repairs only near-miss markup.
+render — what both `--fix` and `--suggest` request. Whole-document and best-effort: it
+also reformats blocks that were already valid, and repairs only near-miss markup.
 _Avoid_: Fix (ambiguous — a finding's `fix` field is advisory prose written for a human,
 not this operation), autofix, repair.
 
@@ -98,3 +98,24 @@ markup carrying something `save()` would never emit (an `aria-hidden` attribute 
 leaves standing.
 _Avoid_: Minor invalidity, cosmetic difference (both obscure the line that actually
 matters — whether a correction exists at all).
+
+**Human workflow**:
+A run whose consumer is a person reading the report: `wpbg <file>` to check, `wpbg <file>
+--fix` to canonicalize in place. The person is editing the file anyway, so the tool is
+free to write to it and the report describes what it did.
+_Avoid_: HITL (jargon, and it names a category of process rather than this tool's
+surface), interactive mode, manual mode.
+
+**Agent workflow**:
+A run whose consumer is a coding agent: `--json` for findings it matches on `code`, and
+`--suggest` to obtain a suggestion it applies itself. The agent owns its own change set,
+so the tool reports and proposes but does not write.
+_Avoid_: CI mode (unrelated axis — CI reads the human workflow's exit code), automated
+mode, robot mode.
+
+**Suggestion**:
+The canonicalized whole-file content the tool returns instead of writing, for an agent to
+apply as its own edit. Absent (`null`) whenever canonicalization is unsafe to attempt or
+produces nothing — the same honesty rule as `search`.
+_Avoid_: Fix (that is the in-place write), patch, diff (a suggestion is whole content, not
+a delta), dry run (describes the write not happening, not the value handed back).
