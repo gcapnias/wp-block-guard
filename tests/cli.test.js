@@ -142,11 +142,19 @@ describe('normalizePatternsForPlatform', () => {
 
 describe('CLI --suggest', () => {
   const tmpFiles = [];
+  const tmpDirs = [];
 
   afterAll(() => {
     for (const f of tmpFiles) {
       try {
         fs.rmSync(f, { force: true });
+      } catch {
+        /* best effort */
+      }
+    }
+    for (const d of tmpDirs) {
+      try {
+        fs.rmSync(d, { recursive: true, force: true });
       } catch {
         /* best effort */
       }
@@ -207,4 +215,32 @@ describe('CLI --suggest', () => {
     expect(status).toBe(0);
     expect(JSON.parse(stdout).files[0].suggestedOutput).toBeNull();
   });
+
+  it('returns one suggestion per matched file, each attributed to its own file', () => {
+    // The per-file `search`/`line` mapping is re-derived per result, so a
+    // multi-file run is where a suggestion could be attributed to the wrong
+    // file. A wide glob also means every corrected file rides in one payload
+    // — intended, but worth pinning so it is not discovered by surprise.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wp-block-guard-suggest-glob-'));
+    tmpDirs.push(dir);
+    const one = path.join(dir, 'one.html');
+    const two = path.join(dir, 'two.html');
+    const clean = path.join(dir, 'clean.html');
+    fs.copyFileSync(path.join(FIXTURES, 'invalid-heading-missing-class.html'), one);
+    fs.copyFileSync(path.join(FIXTURES, 'two-invalid-headings.html'), two);
+    fs.copyFileSync(path.join(FIXTURES, 'valid-heading.html'), clean);
+
+    const { status, stdout } = run([`${dir.split(path.sep).join('/')}/*.html`, '--suggest', '--json']);
+    expect(status).toBe(1);
+
+    const report = JSON.parse(stdout);
+    expect(report.files).toHaveLength(3);
+    const byName = Object.fromEntries(report.files.map((f) => [path.basename(f.file), f]));
+
+    // One heading corrected in one.html, two in two.html: a suggestion
+    // crossed between files would show the wrong count here.
+    expect(byName['one.html'].suggestedOutput.match(/wp-block-heading/g)).toHaveLength(1);
+    expect(byName['two.html'].suggestedOutput.match(/wp-block-heading/g)).toHaveLength(2);
+    expect(byName['clean.html'].suggestedOutput).toBeNull();
+  }, 45000);
 });

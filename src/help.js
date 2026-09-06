@@ -57,6 +57,10 @@ OPTIONS
                  broken file still exits 1 until you apply the suggestion
                  and re-run. The suggestion is re-conformed to the input's
                  own line endings and trailing-newline state.
+
+                 One suggestion per matched file: a wide glob returns every
+                 corrected file in a single payload, so narrow the pattern
+                 if you only mean to act on one.
   -h, --help     Show this text.
   -v, --version  Show the installed version.
 

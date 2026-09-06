@@ -67,8 +67,13 @@ untrustworthy, not about the write. And **not tightened**: `--fix` writes a file
 finding the correction cannot resolve (verified on `unfixable-extra-attribute.html`, which
 `--fix` rewrites while still reporting `BLOCK_INVALID`), so `--suggest` returns a
 suggestion there too. Withholding it unless applying it would clear the finding would be
-stricter than `--fix`, not equal to it — and that verification is
-`docs/adr/0003`-adjacent per-block work, tracked separately.
+stricter than `--fix`, not equal to it — and that verification is per-block work, tracked
+separately.
+
+Note when following that thread: `docs/adr/0003-no-corrected-markup-in-findings.md`
+refuses a per-finding `match` field, but its own body reopens the question and the work to
+add one is an accepted bead. Read 0003 as a record of the obstacles a `match` field must
+answer to, not as a live prohibition.
 
 ## A suggestion is re-conformed to its source
 
