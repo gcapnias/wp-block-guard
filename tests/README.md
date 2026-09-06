@@ -61,6 +61,19 @@ runs), plus `--fix` behavior — copying the invalid fixture to a temp file firs
 mutating the checked-in fixture — including multi-finding `--fix` and 3-level nested
 mismatched closers.
 
+Also covers `--suggest`: that it leaves the file byte-identical (compared as `Buffer`s,
+not strings), that its findings and `ok` deep-equal a plain run of the same file, that
+its skip reasons are the *same strings* `--fix` emits, and that it still returns a
+suggestion for a file whose finding the correction cannot resolve — parity with `--fix`,
+which writes that file too.
+
+The line-ending tests deliberately **construct** their inputs byte-by-byte instead of
+copying a fixture. `core.autocrlf` rewrites checked-in text files on checkout, and every
+fixture here is committed as LF, so a fixture's on-disk endings are a property of the
+machine rather than of the repo — a "CRLF fixture" silently becomes an LF one on a fresh
+clone, and an assertion resting on it would test nothing. See the `conformToSource` unit
+tests for the normalization rules in isolation.
+
 ### `cli.test.js`
 
 Spawns `bin/wp-block-guard.js` via `child_process.spawnSync` end-to-end: clean exit 0,
@@ -83,6 +96,7 @@ Each fixture's expected findings were verified empirically by running
 | `invalid-attrs-json.html` | `<!-- wp:heading {level:2} -->` — unquoted key, invalid JSON | `STRUCTURAL_INVALID_ATTRS_JSON`, `BLOCK_RUNNER_SKIPPED` |
 | `no-blocks.html` | Plain `<p>Hello</p>` with zero `wp:` delimiters | `STRUCTURAL_NO_BLOCKS` (warning only; `ok: true`) |
 | `pattern-with-header.php` | Leading `<?php /* Title: ... */ ?>` header + clean valid block markup | `PHP_HEADER_STRIPPED` (info); otherwise clean |
+| `pattern-with-header-invalid-heading.php` | Leading header + a **repairable** `core/heading` missing `class="wp-block-heading"`. The only fixture combining a stripped PHP header with a fixable block, so the only one that can prove a suggestion re-attaches the header — every other criterion passes if the body is returned alone. (`pattern-with-header.php` is clean and short-circuits; the interpolation fixtures trip the embedded-PHP gate first.) | `PHP_HEADER_STRIPPED`, `BLOCK_INVALID` |
 | `pattern-with-interpolation.php` | Leading header + `core/paragraph` block with embedded `<?php echo esc_html($x); ?>` mid-markup | `PHP_HEADER_STRIPPED`, `PHP_INTERPOLATION_UNCHECKED` (exactly one); no crash in structural/block-runner layers on the masked remainder |
 | `two-invalid-headings.html` | Two separate `core/heading` blocks, each missing `class="wp-block-heading"` | `BLOCK_INVALID` (x2) |
 | `deeply-nested-mismatched-closer.html` | `wp:group > wp:columns > wp:column` (3 levels), with `/wp:columns` and `/wp:column` closed out of order | `STRUCTURAL_MISMATCHED_CLOSER` (x2), `BLOCK_RUNNER_SKIPPED` |

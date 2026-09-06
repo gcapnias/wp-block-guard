@@ -44,14 +44,53 @@ async function findingsForItems(items, content, sourceContent, filePath, headerL
 }
 
 /**
+ * Re-conform a suggestion to the line-ending conventions of the file it was
+ * derived from.
+ *
+ * Canonicalization preserves neither: measured on a CRLF input it returns LF
+ * throughout, and it drops the input's trailing newline. An agent applying a
+ * suggestion writes it back verbatim, so without this it would author a
+ * whole-file line-ending change plus a newline-at-EOF loss it never intended
+ * — noise attributable to this tool in a file the agent did not otherwise
+ * reformat.
+ *
+ * Only the suggestion path uses this. `--fix` loses the trailing newline in
+ * exactly the same way, but that is tracked separately (wpbg-8j7) and fixing
+ * it belongs at the write call, which the suggestion path never reaches.
+ *
+ * @param {string} suggestion canonicalized whole-file content
+ * @param {string} raw the input file exactly as read from disk
+ * @returns {string}
+ */
+export function conformToSource(suggestion, raw) {
+  // Majority wins for a file that mixes both, since a find-and-replace
+  // against it is likeliest to be written in its prevailing convention.
+  const crlfCount = (raw.match(/\r\n/g) || []).length;
+  const lfCount = (raw.match(/(?<!\r)\n/g) || []).length;
+  const eol = crlfCount > lfCount ? '\r\n' : '\n';
+
+  let out = suggestion.replace(/\r\n/g, '\n');
+  if (eol === '\r\n') out = out.replace(/\n/g, '\r\n');
+
+  // Both directions. Appending unconditionally would add a newline to a file
+  // that never had one, which is the same class of unrequested edit.
+  const rawEndsWithNewline = /\n$/.test(raw);
+  const outEndsWithNewline = /\n$/.test(out);
+  if (rawEndsWithNewline && !outEndsWithNewline) out += eol;
+  else if (!rawEndsWithNewline && outEndsWithNewline) out = out.replace(/\r?\n$/, '');
+
+  return out;
+}
+
+/**
  * Run the full three-layer pipeline (PHP-fragment flagging, structural
  * pre-check, block-runner save()-diff) against one file.
  *
  * @param {string} filePath
- * @param {{ fix?: boolean }} [options]
+ * @param {{ fix?: boolean, suggest?: boolean }} [options]
  */
 export async function validateFile(filePath, options = {}) {
-  const { fix = false } = options;
+  const { fix = false, suggest = false } = options;
   const raw = await fs.readFile(filePath, 'utf8');
   const isPhp = /\.php$/i.test(filePath);
 
@@ -141,10 +180,13 @@ export async function validateFile(filePath, options = {}) {
     }
   }
 
-  // --- Optional: --fix, only when safe (see design doc §3, Layer 2 bullet on `fix`) ---
+  // --- Optional: --fix / --suggest, only when safe (see design doc §3, Layer 2 bullet on `fix`) ---
+  // Both request the same canonicalization and share this gating; they differ
+  // only in whether the result is written to disk or handed back.
   let fixApplied = false;
   let fixSkippedReason = null;
-  if (fix) {
+  let suggestedOutput = null;
+  if (fix || suggest) {
     const errorCount = findings.filter((f) => f.severity === 'error').length;
     const onlyBlockRunnerFindings = findings.every((f) =>
       ['PHP_HEADER_STRIPPED', 'BLOCK_INVALID', 'BLOCK_RUNNER_WARNING'].includes(f.code)
@@ -160,7 +202,18 @@ export async function validateFile(filePath, options = {}) {
       fixSkippedReason = 'Contains findings outside block-runner\'s scope; not safely auto-fixable.';
     } else {
       const fixedBody = await fixMarkup(body);
-      if (fixedBody != null) {
+      if (fixedBody == null) {
+        fixSkippedReason = 'block-runner "fix" did not produce output.';
+      } else if (suggest) {
+        // The agent workflow: hand back exactly what --fix would have written
+        // and leave the file alone. Deliberately no re-validate — the one in
+        // the branch below exists only to refresh findings the write made
+        // stale, and nothing was written here. So findings, `ok`, and the exit
+        // code keep describing the file on disk, which is what an agent needs:
+        // it has not applied the suggestion yet, and its confirming re-run
+        // would be meaningless if this call already reported the file clean.
+        suggestedOutput = conformToSource(header + fixedBody, raw);
+      } else {
         await fs.writeFile(filePath, header + fixedBody, 'utf8');
         fixApplied = true;
         body = fixedBody;
@@ -190,8 +243,6 @@ export async function validateFile(filePath, options = {}) {
             ...(await findingsForItems(revalidated.data.items || [], body, body, filePath, headerLines))
           );
         }
-      } else {
-        fixSkippedReason = 'block-runner "fix" did not produce output.';
       }
     }
   }
@@ -204,6 +255,7 @@ export async function validateFile(filePath, options = {}) {
     ok: errorCount === 0,
     fixApplied,
     fixSkippedReason,
+    suggestedOutput,
     findings,
     summary: { errors: errorCount, warnings: warningCount },
   };

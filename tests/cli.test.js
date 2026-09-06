@@ -1,5 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
 import path from 'node:path';
+import fs from 'node:fs';
+import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { normalizePatternsForPlatform } from '../src/cli.js';
@@ -135,5 +137,74 @@ describe('normalizePatternsForPlatform', () => {
       const result = normalizePatternsForPlatform(['.\\tests\\fixtures\\foo.html'], platform);
       expect(result).toEqual(['.\\tests\\fixtures\\foo.html']);
     }
+  });
+});
+
+describe('CLI --suggest', () => {
+  const tmpFiles = [];
+
+  afterAll(() => {
+    for (const f of tmpFiles) {
+      try {
+        fs.rmSync(f, { force: true });
+      } catch {
+        /* best effort */
+      }
+    }
+  });
+
+  const copyToTmp = (fixture) => {
+    const unique = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const tmpFile = path.join(os.tmpdir(), `wp-block-guard-cli-suggest-${unique}.html`);
+    tmpFiles.push(tmpFile);
+    fs.copyFileSync(path.join(FIXTURES, fixture), tmpFile);
+    return tmpFile;
+  };
+
+  it('exits 2 when --fix and --suggest are combined', () => {
+    const { status, stderr } = run([fx('valid-heading.html'), '--fix', '--suggest', '--json']);
+    expect(status).toBe(2);
+    // They state opposite intents about disk, so neither silently wins.
+    expect(stderr).toMatch(/--fix and --suggest cannot be combined/);
+  });
+
+  it('exits 2 when --suggest is used without --json', () => {
+    const { status, stderr } = run([fx('valid-heading.html'), '--suggest']);
+    expect(status).toBe(2);
+    expect(stderr).toMatch(/--suggest requires --json/);
+  });
+
+  it('--help still works alongside --suggest', () => {
+    // The usage checks must not fire ahead of --help, or the flag becomes
+    // undiscoverable from the tool itself.
+    const { status, stdout } = run(['--suggest', '--help']);
+    expect(status).toBe(0);
+    expect(stdout).toMatch(/--suggest/);
+  });
+
+  it('emits the suggestion in JSON, exits 1, and does not touch the file', () => {
+    const tmpFile = copyToTmp('invalid-heading-missing-class.html');
+    const before = fs.readFileSync(tmpFile);
+
+    const { status, stdout } = run([tmpFile.split(path.sep).join('/'), '--suggest', '--json']);
+
+    // Exit 1, not 0: the file on disk is still broken until the agent
+    // applies the suggestion.
+    expect(status).toBe(1);
+    expect(Buffer.compare(fs.readFileSync(tmpFile), before)).toBe(0);
+
+    const report = JSON.parse(stdout);
+    expect(report.ok).toBe(false);
+    expect(report.summary.fixed).toBe(0);
+    const file = report.files[0];
+    expect(file.fixApplied).toBe(false);
+    expect(file.suggestedOutput).toContain('wp-block-heading');
+    expect(file.findings[0].code).toBe('BLOCK_INVALID');
+  }, 45000);
+
+  it('reports suggestedOutput as null for a clean file', () => {
+    const { status, stdout } = run([fx('valid-heading.html'), '--suggest', '--json']);
+    expect(status).toBe(0);
+    expect(JSON.parse(stdout).files[0].suggestedOutput).toBeNull();
   });
 });

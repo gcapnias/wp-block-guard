@@ -31,7 +31,7 @@ export function normalizePatternsForPlatform(patterns, platform = process.platfo
  * @returns {Promise<number>} the process exit code
  */
 export async function main(argv) {
-  const flags = { json: false, strict: false, fix: false, help: false, version: false };
+  const flags = { json: false, strict: false, fix: false, suggest: false, help: false, version: false };
   const patterns = [];
 
   for (const arg of argv) {
@@ -44,6 +44,9 @@ export async function main(argv) {
         break;
       case '--fix':
         flags.fix = true;
+        break;
+      case '--suggest':
+        flags.suggest = true;
         break;
       case '-h':
       case '--help':
@@ -74,6 +77,23 @@ export async function main(argv) {
     return 0;
   }
 
+  // --fix and --suggest state opposite intents about writing to disk, so
+  // together they are a usage error rather than one silently winning.
+  if (flags.fix && flags.suggest) {
+    process.stderr.write('--fix and --suggest cannot be combined: --fix writes the file, --suggest returns it.\n\n');
+    process.stderr.write(HELP_TEXT);
+    return 2;
+  }
+
+  // --suggest belongs to the agent workflow. The human report has nowhere
+  // sensible to render a whole file, and silently dropping the suggestion
+  // would make the flag look like it had worked.
+  if (flags.suggest && !flags.json) {
+    process.stderr.write('--suggest requires --json: the suggestion is a whole file, which the human report does not render.\n\n');
+    process.stderr.write(HELP_TEXT);
+    return 2;
+  }
+
   if (patterns.length === 0) {
     process.stderr.write(HELP_TEXT);
     return 2;
@@ -101,13 +121,14 @@ export async function main(argv) {
   const results = [];
   for (const file of files) {
     try {
-      results.push(await validateFile(file, { fix: flags.fix }));
+      results.push(await validateFile(file, { fix: flags.fix, suggest: flags.suggest }));
     } catch (err) {
       results.push({
         file,
         ok: false,
         fixApplied: false,
         fixSkippedReason: null,
+        suggestedOutput: null,
         summary: { errors: 1, warnings: 0 },
         findings: [
           {

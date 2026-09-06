@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { validateFile } from '../src/index.js';
+import { validateFile, conformToSource } from '../src/index.js';
 import { makeFinding } from '../src/findings.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -408,4 +408,175 @@ describe('validateFile — search (wpbg-qlm)', () => {
     // content would not be found in what is now on disk.
     expectFindableIn(await fs.readFile(tmpFile, 'utf8'), result.findings);
   }, 45000);
+});
+
+describe('validateFile — --suggest', () => {
+  const tmpFiles = [];
+
+  afterAll(async () => {
+    await Promise.all(tmpFiles.map((f) => fs.rm(f, { force: true })));
+  });
+
+  // Writes an input with an exact byte-level line-ending convention rather
+  // than copying a fixture. core.autocrlf rewrites checked-in text files on
+  // checkout and every fixture here is committed as LF, so a fixture's
+  // on-disk endings are a property of the machine, not of the repo — a
+  // "CRLF fixture" silently becomes an LF one on a fresh clone.
+  const writeWithEol = async (name, eol, { trailingNewline }) => {
+    const tmpFile = path.join(os.tmpdir(), `wp-block-guard-suggest-${name}-${Date.now()}.html`);
+    tmpFiles.push(tmpFile);
+    const lines = ['<!-- wp:heading -->', '<h2>Hello World</h2>', '<!-- /wp:heading -->'];
+    await fs.writeFile(tmpFile, lines.join(eol) + (trailingNewline ? eol : ''), 'utf8');
+    return tmpFile;
+  };
+
+  const copyToTmp = async (fixture, suffix = 'html') => {
+    const unique = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const tmpFile = path.join(os.tmpdir(), `wp-block-guard-suggest-${unique}.${suffix}`);
+    tmpFiles.push(tmpFile);
+    await fs.copyFile(fx(fixture), tmpFile);
+    return tmpFile;
+  };
+
+  it('returns the fix and leaves the file byte-identical', async () => {
+    const tmpFile = await copyToTmp('invalid-heading-missing-class.html');
+    const before = await fs.readFile(tmpFile); // Buffer, deliberately not utf8
+
+    const result = await validateFile(tmpFile, { suggest: true });
+
+    // The criterion is the bytes, not the exit code: a suggestion path that
+    // wrote the file would still report findings and still look "correct".
+    expect(Buffer.compare(await fs.readFile(tmpFile), before)).toBe(0);
+    expect(result.fixApplied).toBe(false);
+    expect(result.suggestedOutput).toContain('wp-block-heading');
+  });
+
+  it('reports the same findings and ok as a plain run of the same file', async () => {
+    const tmpFile = await copyToTmp('invalid-heading-missing-class.html');
+
+    const plain = await validateFile(tmpFile);
+    const suggested = await validateFile(tmpFile, { suggest: true });
+
+    // Findings describe the file on disk, which --suggest has not touched.
+    // Reporting the *candidate's* findings would return ok:true for a file
+    // still broken on disk, and make the agent's confirming re-run pointless.
+    expect(suggested.findings).toEqual(plain.findings);
+    expect(suggested.ok).toBe(plain.ok);
+    expect(suggested.ok).toBe(false);
+    expect(suggested.summary).toEqual(plain.summary);
+  }, 45000);
+
+  it('yields no suggestion for a clean file, rather than a copy of the input', async () => {
+    const result = await validateFile(fx('valid-heading.html'), { suggest: true });
+    expect(result.ok).toBe(true);
+    expect(result.suggestedOutput).toBeNull();
+    expect(result.fixSkippedReason).toBeNull();
+  });
+
+  it('includes a stripped PHP header in the suggestion', async () => {
+    // The one criterion no other test catches: the suggestion is
+    // `header + body`, and returning the body alone passes everything else.
+    const tmpFile = await copyToTmp('pattern-with-header-invalid-heading.php', 'php');
+    const result = await validateFile(tmpFile, { suggest: true });
+
+    expect(result.suggestedOutput).toMatch(/^<\?php/);
+    expect(result.suggestedOutput).toContain('Title: Example With Near-Miss Heading');
+    expect(result.suggestedOutput).toContain('wp-block-heading');
+    // Whole file, exactly once — not a header re-attached twice.
+    expect(result.suggestedOutput.split('<?php').length - 1).toBe(1);
+  });
+
+  it('still suggests, and still reports the finding, when the fix cannot resolve it', async () => {
+    // Parity with --fix in the direction that matters: --fix *writes* this
+    // file and leaves the finding standing, so withholding a suggestion here
+    // would be stricter than --fix rather than equal to it. Verifying that
+    // applying a suggestion clears a finding is wpbg-lsf's design, not this
+    // bead's.
+    const tmpFile = await copyToTmp('unfixable-extra-attribute.html');
+    const result = await validateFile(tmpFile, { suggest: true });
+
+    expect(result.suggestedOutput).not.toBeNull();
+    expect(result.ok).toBe(false);
+    expect(result.findings.some((f) => f.code === 'BLOCK_INVALID')).toBe(true);
+    expect(result.fixSkippedReason).toBeNull();
+  });
+
+  it('skips suggesting for blocking structural errors, reusing the --fix reason text', async () => {
+    const tmpFile = await copyToTmp('unbalanced-delimiter.html');
+
+    const suggested = await validateFile(tmpFile, { suggest: true });
+    const fixed = await validateFile(tmpFile, { fix: true });
+
+    expect(suggested.suggestedOutput).toBeNull();
+    expect(suggested.fixSkippedReason).toMatch(/structural/i);
+    // Same gate, same words: the skip reasons are a shared contract, not
+    // per-flag prose.
+    expect(suggested.fixSkippedReason).toBe(fixed.fixSkippedReason);
+  }, 45000);
+
+  it('skips suggesting for embedded PHP, reusing the --fix reason text', async () => {
+    const tmpFile = await copyToTmp('pattern-with-interpolation.php', 'php');
+
+    const suggested = await validateFile(tmpFile, { suggest: true });
+    const fixed = await validateFile(tmpFile, { fix: true });
+
+    expect(suggested.suggestedOutput).toBeNull();
+    expect(suggested.fixSkippedReason).toMatch(/embedded PHP/i);
+    expect(suggested.fixSkippedReason).toBe(fixed.fixSkippedReason);
+  }, 45000);
+
+  it('preserves a CRLF input’s line endings in the suggestion', async () => {
+    const tmpFile = await writeWithEol('crlf', '\r\n', { trailingNewline: true });
+    const result = await validateFile(tmpFile, { suggest: true });
+
+    expect(result.suggestedOutput).not.toBeNull();
+    // Canonicalization returns LF throughout regardless of the input, so
+    // without re-conforming, an agent applying this would author a
+    // whole-file line-ending change it never intended.
+    expect(result.suggestedOutput).toMatch(/\r\n/);
+    expect(result.suggestedOutput.match(/(?<!\r)\n/g)).toBeNull();
+  });
+
+  it('preserves an LF input’s line endings in the suggestion', async () => {
+    const tmpFile = await writeWithEol('lf', '\n', { trailingNewline: true });
+    const result = await validateFile(tmpFile, { suggest: true });
+
+    expect(result.suggestedOutput).not.toBeNull();
+    expect(result.suggestedOutput).not.toMatch(/\r/);
+  });
+
+  it('preserves a trailing newline the input had', async () => {
+    const tmpFile = await writeWithEol('endnl', '\n', { trailingNewline: true });
+    const result = await validateFile(tmpFile, { suggest: true });
+    expect(result.suggestedOutput).toMatch(/\n$/);
+  });
+
+  it('does not add a trailing newline the input lacked', async () => {
+    const tmpFile = await writeWithEol('nonl', '\n', { trailingNewline: false });
+    const result = await validateFile(tmpFile, { suggest: true });
+    expect(result.suggestedOutput).not.toBeNull();
+    expect(result.suggestedOutput).not.toMatch(/\n$/);
+  });
+});
+
+describe('conformToSource', () => {
+  it('leaves a suggestion already matching its source untouched', () => {
+    expect(conformToSource('a\nb\n', 'x\ny\n')).toBe('a\nb\n');
+  });
+
+  it('converts to CRLF when the source is predominantly CRLF', () => {
+    expect(conformToSource('a\nb', 'x\r\ny\r\nz')).toBe('a\r\nb');
+  });
+
+  it('does not double up on a suggestion that is already CRLF', () => {
+    expect(conformToSource('a\r\nb', 'x\r\ny')).toBe('a\r\nb');
+  });
+
+  it('strips a trailing newline the source did not have', () => {
+    expect(conformToSource('a\nb\n', 'x\ny')).toBe('a\nb');
+  });
+
+  it('uses the source convention for a trailing newline it adds', () => {
+    expect(conformToSource('a\r\nb', 'x\r\ny\r\n')).toBe('a\r\nb\r\n');
+  });
 });

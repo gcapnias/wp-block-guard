@@ -1,4 +1,4 @@
-export { validateFile } from './pipeline.js';
+export { validateFile, conformToSource } from './pipeline.js';
 export { buildReport, formatHuman } from './report.js';
 export { FINDING_CODES, describeCode } from './findings.js';
 export { runStructuralLayer, tokenizeDelimiters } from './structural.js';

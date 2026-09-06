@@ -59,8 +59,11 @@ const REGISTRY = {
     severity: 'error',
     message: (o) =>
       `Block "${o.blockName}" content does not match what its save() function would currently render: ${o.detail}`,
+    // Names both surfaces deliberately: this prose is read by humans and
+    // agents alike, and --fix is the wrong advice for a caller that must own
+    // its own edit.
     fix: () =>
-      'Run this tool with --fix to canonicalize near-miss markup (attribute/class/whitespace differences), then re-validate before publishing.',
+      'Canonicalize this near-miss markup (attribute/class/whitespace differences), then re-validate before publishing: --fix rewrites the file in place, or --suggest --json returns the corrected file for you to apply yourself.',
   },
 
   BLOCK_RUNNER_WARNING: {

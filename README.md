@@ -40,7 +40,15 @@ wp-block-guard content/hero.html
 wp-block-guard "content/**/*.html" "patterns/**/*.php"
 wp-block-guard post-body.html --json
 wp-block-guard post-body.html --fix
+wp-block-guard post-body.html --suggest --json
 ```
+
+There are two ways to use this tool, and they differ in who writes the file.
+A **human** checks with `wp-block-guard <file>` and repairs with `--fix`, which
+rewrites the file in place. An **agent** uses `--suggest --json`, which computes
+the same correction, writes nothing, and hands back the corrected file for the
+agent to apply as its own edit — so a whole-document reformat never lands in its
+change set unexplained.
 
 Run `wp-block-guard --help` for the full reference — it is written to be
 self-sufficient for a coding agent encountering the tool for the first time
@@ -55,6 +63,7 @@ The source of truth for that text is [`src/help.js`](src/help.js).
 | `--json` | Emit a single machine-readable JSON report on stdout instead of human-readable text. |
 | `--strict` | Exit `1` if any warnings are present, not only errors. |
 | `--fix` | Canonicalize near-miss markup in place via block-runner's `canonicalize()`, only for files whose sole findings are block-runner attribute/class/whitespace mismatches. Files with structural errors or embedded PHP interpolation are left untouched and reported as "fix skipped" with a reason. |
+| `--suggest` | Compute exactly what `--fix` would write and return it as `suggestedOutput` — the whole file, PHP header included — instead of writing it. Requires `--json`; cannot be combined with `--fix`. Findings, `ok`, and the exit code keep describing the file **on disk**, so a broken file still exits `1` until the suggestion is applied. Same skip gates as `--fix`, and the suggestion is re-conformed to the input's line endings and trailing-newline state. |
 | `-h`, `--help` | Show the full help text. |
 | `-v`, `--version` | Show the installed version. |
 

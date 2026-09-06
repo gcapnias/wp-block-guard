@@ -31,6 +31,7 @@ USAGE
     wp-block-guard "content/**/*.html" "patterns/**/*.php"
     wp-block-guard post-body.html --json
     wp-block-guard post-body.html --fix
+    wp-block-guard post-body.html --suggest --json
 
 OPTIONS
   --json         Emit a single machine-readable JSON object on stdout instead
@@ -43,6 +44,19 @@ OPTIONS
                  or embedded PHP interpolation are left untouched and
                  reported as "fix skipped" with a reason. Always re-run
                  without --fix afterward to confirm the result is clean.
+                 This is the flag for a human fixing their own file.
+  --suggest      Compute exactly what --fix would write, but write nothing:
+                 return it as "suggestedOutput" for the caller to apply as
+                 its own edit. This is the flag for an agent, which should
+                 own the change rather than launder a whole-file rewrite
+                 into its diff. Requires --json, and cannot be combined
+                 with --fix (they state opposite intents about disk).
+
+                 Findings, "ok", and the exit code continue to describe the
+                 file ON DISK, which --suggest has not modified — so a
+                 broken file still exits 1 until you apply the suggestion
+                 and re-run. The suggestion is re-conformed to the input's
+                 own line endings and trailing-newline state.
   -h, --help     Show this text.
   -v, --version  Show the installed version.
 
@@ -61,7 +75,8 @@ INPUT TYPES
 EXIT CODES
   0   All files passed (no error-severity findings; no warnings if --strict).
   1   One or more error-severity findings (or warnings, under --strict).
-  2   Usage error: no files matched, a file could not be read, or an
+  2   Usage error: no files matched, a file could not be read, --fix and
+      --suggest were combined, --suggest was used without --json, or an
       unrecoverable internal failure occurred.
 
 JSON OUTPUT SHAPE (--json)
@@ -74,6 +89,11 @@ JSON OUTPUT SHAPE (--json)
         "ok": boolean,
         "fixApplied": boolean,
         "fixSkippedReason": string | null,
+        "suggestedOutput": string | null,  // --suggest only: the WHOLE corrected
+                                           // file, PHP header included, ready to
+                                           // write back as-is. null when nothing
+                                           // was suggested (clean file, or the
+                                           // same gates that skip --fix).
         "summary": { "errors": n, "warnings": n },
         "findings": [
           {
@@ -129,12 +149,22 @@ PREREQUISITES
 
 AGENT WORKFLOW (recommended loop)
   1. Generate or edit block markup.
-  2. wp-block-guard <file> --json
+  2. wp-block-guard <file> --suggest --json
+     One call: this reports the findings AND hands back the correction, so
+     there is no separate check pass. Expect exit 1 while the file on disk
+     is still broken — that is the point, not a failure of the call.
   3. If ok=false: read each finding's "fix" text, apply the ones you can.
      "search", where it is not null, is the exact text to find in the file —
      use it as the search side of a find-and-replace instead of re-deriving
      the span from "line".
-  4. For remaining BLOCK_INVALID-only findings, try wp-block-guard <file> --fix
-     then re-run step 2 to confirm.
+  4. For remaining BLOCK_INVALID-only findings, write "suggestedOutput" back
+     over the file yourself, then re-run step 2 to confirm ok=true.
+
+     Apply it as your own edit rather than reaching for --fix. Canonicalization
+     rewrites the whole document — re-indenting, reordering delimiter JSON keys
+     and dropping redundant attributes in blocks that were never broken — so
+     --fix would silently fold ~20 lines of unrelated reformatting into your
+     change set with nothing to point at in review. Owning the write means you
+     can explain it.
   5. Only publish to WordPress once ok=true.
 `;
