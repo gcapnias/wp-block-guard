@@ -102,7 +102,9 @@ matters — whether a correction exists at all).
 **Human workflow**:
 A run whose consumer is a person reading the report: `wpbg <file>` to check, `wpbg <file>
 --fix` to canonicalize in place. The person is editing the file anyway, so the tool is
-free to write to it and the report describes what it did.
+free to write to it and the report describes what it did. Paired with the agent workflow
+in `docs/adr/0006-two-workflows-fix-writes-suggest-returns.md`, which records why the
+two surfaces differ.
 _Avoid_: HITL (jargon, and it names a category of process rather than this tool's
 surface), interactive mode, manual mode.
 
