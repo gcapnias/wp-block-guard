@@ -117,7 +117,15 @@ mode, robot mode.
 
 **Suggestion**:
 The canonicalized whole-file content the tool returns instead of writing, for an agent to
-apply as its own edit. Absent (`null`) whenever canonicalization is unsafe to attempt or
-produces nothing — the same honesty rule as `search`.
+apply as its own edit. One per file checked. Absent (`null`) whenever canonicalization is
+unsafe to attempt or produces nothing — the same honesty rule as `search`.
 _Avoid_: Fix (that is the in-place write), patch, diff (a suggestion is whole content, not
 a delta), dry run (describes the write not happening, not the value handed back).
+
+**fixSkippedReason**:
+Why canonicalization was declined for a file — embedded PHP, structural errors, findings
+outside block-runner's scope, or no output — regardless of which workflow asked for it.
+Named for `--fix` but shared with `--suggest`, so that a skip reads identically in both;
+the alternative was duplicating every string.
+_Avoid_: `suggestSkippedReason` (a deliberate non-term — see
+`docs/adr/0006-two-workflows-fix-writes-suggest-returns.md`), fix error, skip message.

@@ -41,6 +41,10 @@ Three consequences that look arbitrary in isolation:
   has nowhere sensible to render. Silently dropping it would make the flag look like it had
   worked; exiting 2 says so.
 - **`--suggest` reports the file on disk, so a broken file still exits 1.** See below.
+- **One suggestion per matched file.** The flag does not narrow the input set, so a wide
+  glob returns every corrected file in a single payload. That is the right default for a
+  bulk agent and a surprise for anyone expecting a single suggestion, so it is documented
+  in the help text rather than left to be discovered.
 
 ## `--suggest` does not re-validate
 
@@ -60,7 +64,13 @@ and receive findings and correction together, with no separate check pass.
 ## Gating is shared, in both directions
 
 `--suggest` reuses `--fix`'s gates unchanged — embedded PHP interpolation, blocking
-structural errors, nothing to fix — and reports the same `fixSkippedReason` strings.
+structural errors, findings outside block-runner's scope, nothing to fix, and
+canonicalization producing no output — and reports the same `fixSkippedReason` strings.
+
+Sharing that field means the agent workflow reports a declined suggestion through a
+fix-named field. That is a known wart, kept deliberately: the requirement was the *same*
+skip-reason text, and a parallel `suggestSkippedReason` would either duplicate every string
+or change `--fix`'s output. Do not add one.
 
 Not relaxed, despite being non-mutating: those gates are about the output being
 untrustworthy, not about the write. And **not tightened**: `--fix` writes a file whose
