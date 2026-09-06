@@ -146,10 +146,11 @@ WHY THIS EXISTS (do not skip if deciding whether to trust this output)
 
 PREREQUISITES
   Node >= 20 (required by block-runner). block-runner is installed as this
-  package's own dependency and is invoked directly (its resolved bin script
-  via node), not through "npx", specifically to avoid npx's own package-
-  resolution overhead (measured at ~12s/call versus block-runner's own
-  ~0.1-0.2s of actual work).
+  package's own dependency and is called in-process via its library API
+  (import { validate, canonicalize } from 'block-runner'), not spawned as a
+  subprocess, so that the one-time cost of booting jsdom and the
+  @wordpress/* tree (~10s) is paid once per run rather than once per file
+  in the validation loop.
 
 AGENT WORKFLOW (recommended loop)
   1. Generate or edit block markup.
