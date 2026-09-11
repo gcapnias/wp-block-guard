@@ -54,9 +54,9 @@ async function findingsForItems(items, content, sourceContent, filePath, headerL
  * — noise attributable to this tool in a file the agent did not otherwise
  * reformat.
  *
- * Only the suggestion path uses this. `--fix` loses the trailing newline in
- * exactly the same way, but that is tracked separately (wpbg-8j7) and fixing
- * it belongs at the write call, which the suggestion path never reaches.
+ * The `--fix` write path uses this too (wpbg-8j7): it loses both the trailing
+ * newline and the source line-ending convention in exactly the same way, so
+ * the write is wrapped with the same call rather than a second normalizer.
  *
  * @param {string} suggestion canonicalized whole-file content
  * @param {string} raw the input file exactly as read from disk
@@ -214,9 +214,20 @@ export async function validateFile(filePath, options = {}) {
         // would be meaningless if this call already reported the file clean.
         suggestedOutput = conformToSource(header + fixedBody, raw);
       } else {
-        await fs.writeFile(filePath, header + fixedBody, 'utf8');
+        // Conform the body alone, not `header + fixedBody`: conformToSource
+        // rewrites EOLs inside its whole input, including the header, which
+        // would shift `header.length` and misalign a slice back out of it.
+        // `header` is already a slice of `raw` (see extractPhpHeader), so it
+        // already carries the file's native EOLs untouched; only `fixedBody`
+        // needs re-conforming. `body` is then reassigned to the conformed
+        // string, not `fixedBody`, so the re-validate below and the write to
+        // disk share one string — block-runner's item offsets, and the
+        // `search` text findingsForItems slices from it, must index the same
+        // bytes that end up on disk (docs/adr/0002-search-is-byte-exact-or-absent.md).
+        const conformedBody = conformToSource(fixedBody, raw);
+        await fs.writeFile(filePath, header + conformedBody, 'utf8');
         fixApplied = true;
-        body = fixedBody;
+        body = conformedBody;
 
         // Re-validate the fixed content so the returned result reflects
         // reality, not the pre-fix findings: block-runner's own findings

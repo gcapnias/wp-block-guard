@@ -88,11 +88,12 @@ answer to, not as a live prohibition.
 ## A suggestion is re-conformed to its source
 
 Canonicalization preserves neither line endings nor the trailing newline: measured, a CRLF
-input comes back LF throughout, and the final newline is dropped. `--fix` has the same
-trailing-newline defect (tracked as its own issue), but there it is one bad write. On the
-agent path the agent writes it back by hand, authoring a whole-file line-ending change it
-never intended. So a suggestion is normalized to the input's own convention and
-trailing-newline state before emission.
+input comes back LF throughout, and the final newline is dropped. `--fix` had the same
+defect (wpbg-8j7), and worse for being one bad write straight to disk rather than a return
+value the agent could inspect first. Both paths now re-conform through `conformToSource`
+before their output reaches the caller — the suggestion over the whole file (`header +
+fixedBody`), `--fix`'s write over the body alone, since `header` is already a verbatim
+slice of the input (see `extractPhpHeader`) and needs no conversion.
 
 ## What this settles
 

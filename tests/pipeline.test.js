@@ -200,6 +200,118 @@ describe('validateFile — --fix', () => {
   });
 });
 
+describe('validateFile — --fix line-ending fidelity (wpbg-8j7)', () => {
+  const tmpFiles = [];
+
+  afterAll(async () => {
+    await Promise.all(tmpFiles.map((f) => fs.rm(f, { force: true })));
+  });
+
+  // Writes an input with an exact byte-level line-ending convention rather
+  // than copying a fixture. core.autocrlf rewrites checked-in text files on
+  // checkout and every fixture here is committed as LF, so a "CRLF fixture"
+  // silently becomes an LF one on a fresh clone or in CI — see the same
+  // pattern in the --suggest describe block above.
+  const writeWithEol = async (name, eol, { trailingNewline }) => {
+    const tmpFile = path.join(os.tmpdir(), `wp-block-guard-fix-eol-${name}-${Date.now()}.html`);
+    tmpFiles.push(tmpFile);
+    const lines = ['<!-- wp:heading -->', '<h2>Hello World</h2>', '<!-- /wp:heading -->'];
+    await fs.writeFile(tmpFile, lines.join(eol) + (trailingNewline ? eol : ''), 'utf8');
+    return tmpFile;
+  };
+
+  // The brief's acceptance criteria name all four combinations explicitly
+  // ("LF-with-trailing-newline, LF-without, CRLF-with-trailing-newline,
+  // CRLF-without"). Each test below asserts both axes together (EOL
+  // convention and trailing-newline state), so a fix that gets one axis
+  // right and the other wrong for a given combination cannot pass silently.
+
+  it('preserves CRLF with a trailing newline', async () => {
+    const tmpFile = await writeWithEol('crlf-nl', '\r\n', { trailingNewline: true });
+    const result = await validateFile(tmpFile, { fix: true });
+    expect(result.fixApplied).toBe(true);
+
+    const written = await fs.readFile(tmpFile, 'utf8');
+    expect(written).toMatch(/\r\n/);
+    expect(written.match(/(?<!\r)\n/g)).toBeNull();
+    expect(written).toMatch(/\r\n$/);
+  }, 45000);
+
+  it('preserves CRLF without a trailing newline', async () => {
+    const tmpFile = await writeWithEol('crlf-nonl', '\r\n', { trailingNewline: false });
+    const result = await validateFile(tmpFile, { fix: true });
+    expect(result.fixApplied).toBe(true);
+
+    const written = await fs.readFile(tmpFile, 'utf8');
+    expect(written).toMatch(/\r\n/);
+    expect(written.match(/(?<!\r)\n/g)).toBeNull();
+    expect(written).not.toMatch(/\r?\n$/);
+  }, 45000);
+
+  it('preserves LF with a trailing newline', async () => {
+    const tmpFile = await writeWithEol('lf-nl', '\n', { trailingNewline: true });
+    const result = await validateFile(tmpFile, { fix: true });
+    expect(result.fixApplied).toBe(true);
+
+    const written = await fs.readFile(tmpFile, 'utf8');
+    expect(written).not.toMatch(/\r/);
+    expect(written).toMatch(/\n$/);
+  }, 45000);
+
+  it('preserves LF without a trailing newline', async () => {
+    const tmpFile = await writeWithEol('lf-nonl', '\n', { trailingNewline: false });
+    const result = await validateFile(tmpFile, { fix: true });
+    expect(result.fixApplied).toBe(true);
+
+    const written = await fs.readFile(tmpFile, 'utf8');
+    expect(written).not.toMatch(/\r/);
+    expect(written).not.toMatch(/\n$/);
+  }, 45000);
+
+  // The one shape where conforming and not conforming would actually diverge:
+  // a --fix run that leaves a residual finding standing (block-runner cannot
+  // resolve it) on a CRLF input, where the finding's resolved span crosses a
+  // line boundary. A single-line span (e.g. unfixable-extra-attribute.html's)
+  // contains no EOL at all, so it would pass identically whether `body` is
+  // the conformed CRLF string or the unconformed LF `fixedBody` — a vacuous
+  // test. This fixture nests a paragraph inside the offending group so the
+  // resolved span for the group's BLOCK_INVALID runs across three lines,
+  // making the CRLF/LF distinction actually load-bearing.
+  //
+  // Verified directly (not assumed): reverting the write path to reassign
+  // `body = fixedBody` instead of the conformed string makes this test fail
+  // (`search` comes back with LF, `written` has CRLF, no match) — so this is
+  // not decoration.
+  it('emits a byte-exact search for a residual, multi-line finding on a CRLF input after --fix', async () => {
+    const markup = [
+      '<!-- wp:group {"className":"word-cloud-bg","layout":{"type":"default"}} -->',
+      '<div class="wp-block-group word-cloud-bg" aria-hidden="true"><!-- wp:paragraph -->',
+      '<p>Hi</p>',
+      '<!-- /wp:paragraph --></div>',
+      '<!-- /wp:group -->',
+      '',
+    ].join('\n');
+    const crlf = markup.replace(/\n/g, '\r\n');
+    const tmpFile = path.join(os.tmpdir(), `wp-block-guard-fix-eol-residual-${Date.now()}.html`);
+    tmpFiles.push(tmpFile);
+    await fs.writeFile(tmpFile, crlf, 'utf8');
+
+    const result = await validateFile(tmpFile, { fix: true });
+    const residual = result.findings.filter((f) => f.code === 'BLOCK_INVALID');
+    expect(residual.length).toBeGreaterThan(0);
+
+    const written = await fs.readFile(tmpFile, 'utf8');
+    expect(written).toMatch(/\r\n/);
+    for (const finding of residual) {
+      expect(finding.search).not.toBeNull();
+      // A finding whose span crosses a line boundary must carry CRLF here,
+      // or the CRLF/LF distinction wouldn't be exercised at all.
+      expect(finding.search).toMatch(/\r\n/);
+      expect(written).toContain(finding.search);
+    }
+  }, 45000);
+});
+
 describe('block-runner stderr containment', () => {
   const tmpFiles = [];
   afterAll(async () => {
