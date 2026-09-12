@@ -1,6 +1,6 @@
 # A finding's `search` is byte-exact or absent, never best-effort
 
-Status: accepted 2026-09-03, amended 2026-09-05 (see "Amendment" below)
+Status: accepted 2026-09-03, amended 2026-09-05, amended 2026-09-12 (see "Amendments" below)
 
 A finding carries `search`, the exact source text an agent should look for in order to
 replace it. Every value is a contiguous slice of the file as it exists on disk, so a
@@ -52,7 +52,9 @@ children-removed form; that form is what establishes the verdict, but it appears
 in the source, so it cannot be what `search` reports. The reported span is the block's
 inner content whole, nested children included.
 
-## Amendment (2026-09-05): `BLOCK_INVALID` is now populated
+## Amendments
+
+### 2026-09-05: `BLOCK_INVALID` is now populated
 
 As originally accepted, this ADR specified `null` for `BLOCK_INVALID` and
 `BLOCK_RUNNER_WARNING` — the codes that fire most often on real input — because
@@ -78,3 +80,39 @@ same risk as text handed to an agent to replace.
 
 Consequence: the only remaining `search: null` cases are findings with no single span, and
 files whose block structure we and block-runner disagree about.
+
+### 2026-09-12: `match` (wpbg-lsf) inherits the same rule, and is leaf-only for good
+
+`wpbg-lsf` added `match`, the verified replacement text for a leaf `BLOCK_INVALID`
+finding — the other half of a `{ search, match }` `TextEdit`. It ships `null`
+unconditionally for any block with children. `wpbg-hdl` was a spike to determine whether
+that was a temporary limitation, and settled that it is not: a parent's `match` is
+permanently out of scope, and the reason is this ADR's own rule, not a separate one.
+
+The mechanism (`resolveMatch()` in `src/block-locator.js`) canonicalizes a block's full
+markup and splices the corrected inner span back into the original delimiters. For a leaf
+this is byte-exact and verified before being emitted, matching this ADR's rule directly.
+For a block with children, canonicalizing it recursively re-serializes every descendant
+too — this is not a bug to fix, it is what Gutenberg's `canonicalize`/`save()` does for any
+markup spanning more than one block. Whether a given descendant's bytes survive that
+re-serialization unchanged turns out to depend entirely on whether the source's existing
+formatting (whitespace between a block's delimiter and its own content) already happens to
+match what the serializer would emit for that block type — not on where the defect is.
+Measured directly (`handoff/2026-09-12-wpbg-hdl-spike-findings.md`): a fixture whose
+child markup already matched the serializer's own convention came back byte-identical,
+while a fixture with the same shape (defect confined to the parent's own wrapper, valid
+children) but different pre-existing whitespace had its children's bytes rewritten, and in
+two cases the rewrite introduced findings that were not present in the baseline.
+
+That is not knowable ahead of the rewrite without doing the rewrite and diffing the
+result — the exact "was it corrected, or just reformatted?" ambiguity `match` exists to
+avoid answering by inspection. So a parent's `match` would not be a `TextEdit` at all; it
+would be a bulk, unverifiable rewrite of the parent's entire subtree, masquerading as one.
+There is no narrower rule that rescues a scoped version of it: the ticket that proposed
+`match` for parents also proposed confining it to defects in the parent's own opening tag,
+but the spike's synthetic counter-fixture showed that axis doesn't predict the outcome —
+byte-preservation tracks the source's formatting convention, not the defect's location.
+
+Consequence: `match` is `null` for any block with children, permanently, by the same logic
+that already governs `search` — not a gap to close later, and not the "nested-parent
+support" bead `wpbg-lsf`'s original ticket anticipated.
