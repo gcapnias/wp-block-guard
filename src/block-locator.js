@@ -66,7 +66,7 @@ function shallowMarkup(content, node) {
  * @param {object} node
  * @returns {{ start: number, end: number }}
  */
-function markupSpan(content, node) {
+export function markupSpan(content, node) {
   if (node.innerStart == null || node.innerEnd == null) return { start: node.start, end: node.end };
   let start = node.innerStart;
   let end = node.innerEnd;
@@ -97,11 +97,18 @@ function markupSpan(content, node) {
  * count already equals its item count has a forced mapping, and a name
  * appearing once cannot be confused with anything.
  *
+ * The returned entry also carries the block-tree `node` itself (`children`,
+ * `start`, `end`, `innerStart`, `innerEnd`) alongside the resolved `line`/
+ * `start`/`end` span — `resolveMatch()` below needs the node's own children
+ * (to gate leaf-only) and its full span (to isolate the block for
+ * canonicalization), and it is already in hand at the point `line`/`start`/
+ * `end` are computed, so there is no reason to re-walk the tree for it.
+ *
  * @param {object} params
  * @param {string} params.content the markup exactly as handed to block-runner
  * @param {Array<{ block?: string, status?: string }>} params.items report items
  * @param {(markup: string) => Promise<{ ok: boolean, data: object|null }>} params.validateMarkup
- * @returns {Promise<Array<{ line: number, start: number, end: number }|null>>}
+ * @returns {Promise<Array<{ line: number, start: number, end: number, node: object }|null>>}
  */
 export async function resolveItemLines({ content, items, validateMarkup }) {
   const unresolved = items.map(() => null);
@@ -150,6 +157,65 @@ export async function resolveItemLines({ content, items, validateMarkup }) {
 
   return ordered.map((node) => {
     const span = markupSpan(content, node);
-    return { line: lineAt(content, span.start), start: span.start, end: span.end };
+    return { line: lineAt(content, span.start), start: span.start, end: span.end, node };
   });
+}
+
+/**
+ * Compute the verified replacement text for a leaf `BLOCK_INVALID` finding —
+ * the `match` half of a `{ search, match }` `TextEdit`.
+ *
+ * `null` for a block with children, unconditionally: validating a block in
+ * isolation strips its inner blocks (see `shallowMarkup()` above), so
+ * canonicalizing a parent comes back with its children gone, and splicing
+ * that in would silently destroy them. Nested-parent support is out of scope
+ * here (wpbg-hdl).
+ *
+ * For a leaf, canonicalizes the block alone, re-conforms the *whole*
+ * canonicalized block to the file's own line-ending convention (not just the
+ * extracted inner content — `conformToSource` matches the *input's* trailing-
+ * newline state against the *whole file*, and an inner span with its
+ * surrounding whitespace already trimmed off would almost always read as
+ * "lacks a trailing newline", spuriously earning one back), then extracts the
+ * corrected element the same way `search` was extracted from the original
+ * (`markupSpan`), splices it into the block's own original delimiters, and
+ * verifies the splice actually validates clean before returning it. `null`
+ * unless that verification passes: this is a claim an agent applies
+ * unattended, not a best-effort guess (docs/adr/0002-search-is-byte-exact-or-absent.md
+ * extends the same honesty rule here).
+ *
+ * @param {object} params
+ * @param {object} params.node the block-tree node from `resolveItemLines`'s resolved entry
+ * @param {{ start: number, end: number }} params.searchSpan the same span reported as `search`
+ * @param {string} params.sourceContent the unmasked file content `node`'s offsets index into
+ * @param {string} params.raw the file exactly as read from disk, for line-ending conformance
+ * @param {(markup: string) => Promise<string|null>} params.fixMarkup canonicalize a markup string
+ * @param {(markup: string) => Promise<{ ok: boolean, data: object|null }>} params.validateMarkup
+ * @param {(suggestion: string, raw: string) => string} params.conformToSource
+ * @returns {Promise<string|null>}
+ */
+export async function resolveMatch({ node, searchSpan, sourceContent, raw, fixMarkup, validateMarkup, conformToSource }) {
+  if (node.children.length > 0) return null;
+
+  const blockMarkup = sourceContent.slice(node.start, node.end);
+  const correctedRaw = await fixMarkup(blockMarkup);
+  if (correctedRaw == null) return null;
+
+  const conformedBlock = conformToSource(correctedRaw, raw);
+
+  const correctedNodes = flattenBlockTree(buildBlockTree(conformedBlock)).filter((b) => b.end != null);
+  if (correctedNodes.length !== 1) return null;
+
+  const correctedSpan = markupSpan(conformedBlock, correctedNodes[0]);
+  const correctedInner = conformedBlock.slice(correctedSpan.start, correctedSpan.end);
+
+  const candidate =
+    sourceContent.slice(node.start, searchSpan.start) + correctedInner + sourceContent.slice(searchSpan.end, node.end);
+
+  const result = await validateMarkup(candidate);
+  if (!result.ok || !result.data) return null;
+  if (result.data.summary && result.data.summary.blocks !== 1) return null;
+  if ((result.data.items || []).length > 0) return null;
+
+  return correctedInner;
 }

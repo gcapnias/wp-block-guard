@@ -3,7 +3,7 @@ import { extractPhpHeader, scanForEmbeddedPhp, maskEmbeddedPhp } from './php-fra
 import { runStructuralLayer, BLOCKING_STRUCTURAL_CODES } from './structural.js';
 import { validateMarkup, fixMarkup } from './block-runner-adapter.js';
 import { makeFinding } from './findings.js';
-import { resolveItemLines } from './block-locator.js';
+import { resolveItemLines, resolveMatch } from './block-locator.js';
 
 /**
  * Turn block-runner's report items into findings, with positions re-derived
@@ -19,28 +19,56 @@ import { resolveItemLines } from './block-locator.js';
  * trust must not be turned into text to find and replace
  * (`docs/adr/0002-search-is-byte-exact-or-absent.md`).
  *
+ * `match` (wpbg-lsf) is the verified replacement for `search`, computed only
+ * when `suggest` is true — the cost of canonicalizing and re-validating each
+ * block in isolation is only worth paying when a caller has asked for a
+ * correction to apply. It is `null` for anything but a leaf `BLOCK_INVALID`,
+ * so this call site is shared with the plain-validate and `--fix`
+ * post-write revalidation paths, both of which always pass `suggest: false`
+ * (or omit it) and so never pay the cost or emit a value.
+ *
  * @param {Array<object>} items
  * @param {string} content the markup handed to block-runner
  * @param {string} sourceContent the same markup before PHP masking, to slice from
  * @param {string} filePath
  * @param {number} headerLines lines consumed by a stripped PHP header
+ * @param {{ suggest?: boolean, raw?: string }} [options]
  */
-async function findingsForItems(items, content, sourceContent, filePath, headerLines) {
+async function findingsForItems(items, content, sourceContent, filePath, headerLines, options = {}) {
+  const { suggest = false, raw } = options;
   const resolved = await resolveItemLines({ content, items, validateMarkup });
 
-  return items.map((item, index) => {
-    const code = item.status === 'warning' ? 'BLOCK_RUNNER_WARNING' : 'BLOCK_INVALID';
-    const fallback = item.source && item.source.htmlLine ? item.source.htmlLine : null;
-    const line = resolved[index] ? resolved[index].line : fallback;
+  return Promise.all(
+    items.map(async (item, index) => {
+      const code = item.status === 'warning' ? 'BLOCK_RUNNER_WARNING' : 'BLOCK_INVALID';
+      const fallback = item.source && item.source.htmlLine ? item.source.htmlLine : null;
+      const line = resolved[index] ? resolved[index].line : fallback;
 
-    return makeFinding(code, {
-      file: filePath,
-      line: line == null ? undefined : line + headerLines,
-      blockName: item.block,
-      detail: item.reason,
-      search: resolved[index] ? sourceContent.slice(resolved[index].start, resolved[index].end) : null,
-    });
-  });
+      const searchSpan = resolved[index] ? { start: resolved[index].start, end: resolved[index].end } : null;
+
+      let match = null;
+      if (suggest && code === 'BLOCK_INVALID' && searchSpan) {
+        match = await resolveMatch({
+          node: resolved[index].node,
+          searchSpan,
+          sourceContent,
+          raw,
+          fixMarkup,
+          validateMarkup,
+          conformToSource,
+        });
+      }
+
+      return makeFinding(code, {
+        file: filePath,
+        line: line == null ? undefined : line + headerLines,
+        blockName: item.block,
+        detail: item.reason,
+        search: searchSpan ? sourceContent.slice(searchSpan.start, searchSpan.end) : null,
+        match,
+      });
+    })
+  );
 }
 
 /**
@@ -176,7 +204,15 @@ export async function validateFile(filePath, options = {}) {
         })
       );
     } else {
-      findings.push(...(await findingsForItems(result.data.items || [], body, unmaskedBody, filePath, headerLines)));
+      findings.push(
+        ...(await findingsForItems(result.data.items || [], body, unmaskedBody, filePath, headerLines, {
+          // Embedded PHP gates --suggest/--fix out entirely further down (the
+          // "not safely auto-fixable" skip), so a match computed here would
+          // describe a correction the caller was just told is unavailable.
+          suggest: suggest && !hasEmbeddedPhp,
+          raw,
+        }))
+      );
     }
   }
 

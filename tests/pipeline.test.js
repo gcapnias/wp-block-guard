@@ -437,9 +437,10 @@ describe('validateFile — search (wpbg-qlm)', () => {
     }
   };
 
-  it('places search between message and fix, which is the agent-facing JSON shape', () => {
+  it('places search (then match) between message and fix, which is the agent-facing JSON shape', () => {
     // JSON.stringify preserves insertion order, so field order is part of the
-    // contract an agent reads, not just cosmetics.
+    // contract an agent reads, not just cosmetics. match (wpbg-lsf) sits right
+    // after search, before fix.
     expect(Object.keys(makeFinding('BLOCK_INVALID', { file: 'f.html', line: 2, detail: 'd' }))).toEqual([
       'code',
       'severity',
@@ -448,6 +449,7 @@ describe('validateFile — search (wpbg-qlm)', () => {
       'blockName',
       'message',
       'search',
+      'match',
       'fix',
     ]);
   });
@@ -563,7 +565,7 @@ describe('validateFile — --suggest', () => {
     expect(result.suggestedOutput).toContain('wp-block-heading');
   });
 
-  it('reports the same findings and ok as a plain run of the same file', async () => {
+  it('reports the same findings and ok as a plain run of the same file, aside from match', async () => {
     const tmpFile = await copyToTmp('invalid-heading-missing-class.html');
 
     const plain = await validateFile(tmpFile);
@@ -572,7 +574,14 @@ describe('validateFile — --suggest', () => {
     // Findings describe the file on disk, which --suggest has not touched.
     // Reporting the *candidate's* findings would return ok:true for a file
     // still broken on disk, and make the agent's confirming re-run pointless.
-    expect(suggested.findings).toEqual(plain.findings);
+    // match (wpbg-lsf) is the one deliberate exception: it is only ever
+    // computed under --suggest (the whole point is that the cost is opt-in),
+    // so it is null on the plain run and populated on the --suggest run for
+    // this fixture's leaf BLOCK_INVALID finding.
+    const stripMatch = (findings) => findings.map(({ match, ...rest }) => rest);
+    expect(stripMatch(suggested.findings)).toEqual(stripMatch(plain.findings));
+    expect(plain.findings.every((f) => f.match === null)).toBe(true);
+    expect(suggested.findings.some((f) => f.code === 'BLOCK_INVALID' && f.match !== null)).toBe(true);
     expect(suggested.ok).toBe(plain.ok);
     expect(suggested.ok).toBe(false);
     expect(suggested.summary).toEqual(plain.summary);
@@ -669,6 +678,122 @@ describe('validateFile — --suggest', () => {
     expect(result.suggestedOutput).not.toBeNull();
     expect(result.suggestedOutput).not.toMatch(/\n$/);
   });
+});
+
+describe('validateFile — --suggest match (wpbg-lsf)', () => {
+  const tmpFiles = [];
+
+  afterAll(async () => {
+    await Promise.all(tmpFiles.map((f) => fs.rm(f, { force: true })));
+  });
+
+  const copyToTmp = async (fixture, suffix = 'html') => {
+    const unique = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const tmpFile = path.join(os.tmpdir(), `wp-block-guard-match-${unique}.${suffix}`);
+    tmpFiles.push(tmpFile);
+    await fs.copyFile(fx(fixture), tmpFile);
+    return tmpFile;
+  };
+
+  // Constructs both line-ending inputs byte-by-byte at runtime rather than
+  // relying on a checked-in fixture's on-disk endings — every fixture here is
+  // committed as LF (core.autocrlf, no .gitattributes), so a fixture's
+  // apparent CRLF-ness is a property of the checkout, not the repo. Mirrors
+  // the pattern already used in the --suggest describe block above.
+  // The heading's own inner content spans two lines (`Hello` / `World`) so
+  // the resolved span itself crosses a line boundary — a single-line span
+  // contains no EOL at all, and would pass this assertion regardless of
+  // whether match's line endings were conformed (the same trap wpbg-8j7's
+  // test 5 found for `search`).
+  const writeWithEol = async (name, eol) => {
+    const tmpFile = path.join(os.tmpdir(), `wp-block-guard-match-${name}-${Date.now()}.html`);
+    tmpFiles.push(tmpFile);
+    const lines = ['<!-- wp:heading {"level":2} -->', '<h2>Hello', 'World</h2>', '<!-- /wp:heading -->'];
+    await fs.writeFile(tmpFile, lines.join(eol) + eol, 'utf8');
+    return tmpFile;
+  };
+
+  it('is null for every finding on a plain (non-suggest) run', async () => {
+    const result = await validateFile(fx('invalid-heading-missing-class.html'));
+    expect(result.findings.length).toBeGreaterThan(0);
+    for (const finding of result.findings) {
+      expect(finding).toHaveProperty('match', null);
+    }
+  });
+
+  it('leaves search unchanged from a plain run', async () => {
+    const plain = await validateFile(fx('invalid-heading-missing-class.html'));
+    const suggested = await validateFile(fx('invalid-heading-missing-class.html'), { suggest: true });
+    expect(suggested.findings.map((f) => f.search)).toEqual(plain.findings.map((f) => f.search));
+  });
+
+  it('gives a verified correction: replacing search with match produces a file that validates clean', async () => {
+    const tmpFile = await copyToTmp('invalid-heading-missing-class.html');
+    const result = await validateFile(tmpFile, { suggest: true });
+
+    const finding = result.findings.find((f) => f.code === 'BLOCK_INVALID');
+    expect(finding.search).not.toBeNull();
+    expect(finding.match).not.toBeNull();
+
+    const raw = await fs.readFile(tmpFile, 'utf8');
+    expect(raw).toContain(finding.search);
+    const repaired = raw.replace(finding.search, finding.match);
+
+    const repairedFile = path.join(os.tmpdir(), `wp-block-guard-match-repaired-${Date.now()}.html`);
+    tmpFiles.push(repairedFile);
+    await fs.writeFile(repairedFile, repaired, 'utf8');
+
+    const revalidated = await validateFile(repairedFile);
+    expect(revalidated.ok).toBe(true);
+    expect(revalidated.findings).toEqual([]);
+  }, 45000);
+
+  it('is null for a block with children, even though the parent is invalid', async () => {
+    const result = await validateFile(fx('invalid-parent-valid-child.html'), { suggest: true });
+    const finding = result.findings.find((f) => f.code === 'BLOCK_INVALID');
+    expect(finding).toBeDefined();
+    expect(finding.blockName).toBe('core/group');
+    expect(finding.match).toBeNull();
+  }, 45000);
+
+  it('is null when the correction does not resolve the finding', async () => {
+    const result = await validateFile(fx('unfixable-extra-attribute.html'), { suggest: true });
+    const finding = result.findings.find((f) => f.code === 'BLOCK_INVALID');
+    expect(finding).toBeDefined();
+    expect(finding.match).toBeNull();
+  }, 45000);
+
+  it('is null under --suggest when embedded PHP makes the whole file not safely auto-fixable', async () => {
+    const tmpFile = await copyToTmp('pattern-with-interpolation.php', 'php');
+    const result = await validateFile(tmpFile, { suggest: true });
+    expect(result.fixSkippedReason).toMatch(/embedded PHP/i);
+    for (const finding of result.findings) {
+      expect(finding.match).toBeNull();
+    }
+  }, 45000);
+
+  it('matches the CRLF input file’s line-ending convention', async () => {
+    const tmpFile = await writeWithEol('crlf', '\r\n');
+    const result = await validateFile(tmpFile, { suggest: true });
+    const finding = result.findings.find((f) => f.code === 'BLOCK_INVALID');
+
+    expect(finding.match).not.toBeNull();
+    expect(finding.match).toMatch(/\r\n/);
+    expect(finding.match.match(/(?<!\r)\n/g)).toBeNull();
+    // No spurious trailing newline: match is a spliceable inner span, not a
+    // whole line.
+    expect(finding.match).not.toMatch(/\r?\n$/);
+  }, 45000);
+
+  it('matches the LF input file’s line-ending convention', async () => {
+    const tmpFile = await writeWithEol('lf', '\n');
+    const result = await validateFile(tmpFile, { suggest: true });
+    const finding = result.findings.find((f) => f.code === 'BLOCK_INVALID');
+
+    expect(finding.match).not.toBeNull();
+    expect(finding.match).not.toMatch(/\r/);
+    expect(finding.match).not.toMatch(/\r?\n$/);
+  }, 45000);
 });
 
 describe('conformToSource', () => {

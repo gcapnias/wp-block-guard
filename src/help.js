@@ -108,6 +108,10 @@ JSON OUTPUT SHAPE (--json)
             "blockName": "core/heading",   // present when the finding is block-scoped
             "message": "human-readable explanation of what is wrong",
             "search": "<h2>Hello</h2>",         // byte-exact source text at fault, or null
+            "match": "<h2 class=\"wp-block-heading\">Hello</h2>", // --suggest only, verified
+                                           // replacement for "search" (a leaf BLOCK_INVALID
+                                           // whose correction re-validates clean); null
+                                           // otherwise, including on every non-suggest run
             "fix": "human/agent-readable suggestion of what to do about it, or null"
           }
         ]
@@ -161,7 +165,13 @@ AGENT WORKFLOW (recommended loop)
   3. If ok=false: read each finding's "fix" text, apply the ones you can.
      "search", where it is not null, is the exact text to find in the file —
      use it as the search side of a find-and-replace instead of re-deriving
-     the span from "line".
+     the span from "line". Where "match" is also not null (--suggest only),
+     it is the verified replacement text: this tool has already spliced it
+     in and re-validated that doing so clears the finding, so replacing
+     "search" with "match" is a surgical, pre-checked edit rather than a
+     whole-file rewrite. "match" is null more often than "search" is — it
+     is only ever populated for a BLOCK_INVALID finding on a leaf block
+     (no nested children) whose correction actually resolves it.
   4. For remaining BLOCK_INVALID-only findings, write "suggestedOutput" back
      over the file yourself, then re-run step 2 to confirm ok=true.
 

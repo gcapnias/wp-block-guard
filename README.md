@@ -157,7 +157,12 @@ this tool.
 
 Every finding has a stable `code`, a `severity` (`error` | `warning` | `info`), a
 `fix` string an agent can act on directly, and `search` — the byte-exact source text at
-fault, or `null` where no single span can be identified with certainty. Full table and
+fault, or `null` where no single span can be identified with certainty. Under `--suggest`,
+a finding also carries `match`: the verified replacement for `search`, populated only for
+a leaf `BLOCK_INVALID` finding whose correction has actually been re-validated to clear it,
+and `null` otherwise (including on every plain run). `search` and `match` together are an
+LSP-style `TextEdit` expressed as text — replace `search` with `match` for a surgical,
+pre-checked edit instead of applying the whole-file `suggestedOutput`. Full table and
 explanation: run `wp-block-guard --help`, or see the `REGISTRY` in [`src/findings.js`](src/findings.js).
 
 | Code | Severity | Meaning |

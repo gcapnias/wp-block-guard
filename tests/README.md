@@ -101,6 +101,7 @@ Each fixture's expected findings were verified empirically by running
 | `two-invalid-headings.html` | Two separate `core/heading` blocks, each missing `class="wp-block-heading"` | `BLOCK_INVALID` (x2) |
 | `deeply-nested-mismatched-closer.html` | `wp:group > wp:columns > wp:column` (3 levels), with `/wp:columns` and `/wp:column` closed out of order | `STRUCTURAL_MISMATCHED_CLOSER` (x2), `BLOCK_RUNNER_SKIPPED` |
 | `interpolated-delimiter-attrs.php` | `<?php ?>` interpolated **inside a delimiter comment's attribute JSON** — the only shape where slicing `search` from the PHP-masked body differs from the original | `PHP_HEADER_STRIPPED`, `PHP_INTERPOLATION_UNCHECKED`, `STRUCTURAL_INVALID_ATTRS_JSON` (the masked JSON no longer parses), `BLOCK_RUNNER_SKIPPED` |
+| `invalid-parent-valid-child.html` | `core/group` missing its `wp-block-group` class, wrapping a **valid** `core/paragraph` child — the only fixture exercising `match`'s children-gate (wpbg-lsf): the parent is a real, otherwise-fixable near-miss, but has children, so `match` must be `null` | `BLOCK_INVALID` (the group only; the child is clean) |
 
 When adding a fixture, run it through the CLI with `--json` first and copy the actual
 output into the test assertion — do not guess expected findings.

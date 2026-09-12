@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveItemLines } from '../src/block-locator.js';
+import { resolveItemLines, resolveMatch } from '../src/block-locator.js';
 
 // A stub standing in for block-runner: a shallow block counts as invalid when
 // its markup contains BAD. Lets the mapping logic be tested without paying the
@@ -173,5 +173,93 @@ describe('resolveItemLines', () => {
       validateMarkup,
     });
     expect(sliced(content, resolved)).toEqual([{ line: 1, text: content }]);
+  });
+});
+
+// Unit-level coverage for wpbg-lsf's `match` computation, stubbing block-
+// runner (fixMarkup/validateMarkup) the same way resolveItemLines' own tests
+// do above, so these run fast and deterministic without a real jsdom +
+// Gutenberg boot. `resolveItemLines` (real, unstubbed) supplies the `node`
+// and `searchSpan` — the same shape src/pipeline.js hands to `resolveMatch`.
+describe('resolveMatch', () => {
+  const LEAF_CONTENT = '<!-- wp:heading {"level":2} -->\n<h2>BAD</h2>\n<!-- /wp:heading -->';
+
+  const leafNodeAndSpan = async () => {
+    const { validateMarkup } = stub();
+    const [entry] = await resolveItemLines({
+      content: LEAF_CONTENT,
+      items: [item('core/heading')],
+      validateMarkup,
+    });
+    return { node: entry.node, searchSpan: { start: entry.start, end: entry.end } };
+  };
+
+  it('returns null for a block with children, without ever calling fixMarkup', async () => {
+    const { node, searchSpan } = await leafNodeAndSpan();
+    let fixMarkupCalled = false;
+    const parentNode = { ...node, children: [{ start: 0, end: 1 }] };
+
+    const result = await resolveMatch({
+      node: parentNode,
+      searchSpan,
+      sourceContent: LEAF_CONTENT,
+      raw: LEAF_CONTENT,
+      fixMarkup: async () => {
+        fixMarkupCalled = true;
+        return null;
+      },
+      validateMarkup: async () => ({ ok: true, data: { summary: { blocks: 1 }, items: [] } }),
+      conformToSource: (s) => s,
+    });
+
+    // The gate short-circuits before canonicalization is even attempted —
+    // splicing a parent's canonicalized-alone form back in would silently
+    // destroy its children, so it must never get that far.
+    expect(result).toBeNull();
+    expect(fixMarkupCalled).toBe(false);
+  });
+
+  it('returns null when canonicalization produces no output', async () => {
+    const { node, searchSpan } = await leafNodeAndSpan();
+    const result = await resolveMatch({
+      node,
+      searchSpan,
+      sourceContent: LEAF_CONTENT,
+      raw: LEAF_CONTENT,
+      fixMarkup: async () => null,
+      validateMarkup: async () => ({ ok: true, data: { summary: { blocks: 1 }, items: [] } }),
+      conformToSource: (s) => s,
+    });
+    expect(result).toBeNull();
+  });
+
+  it('returns null when the spliced candidate does not validate clean', async () => {
+    const { node, searchSpan } = await leafNodeAndSpan();
+    const result = await resolveMatch({
+      node,
+      searchSpan,
+      sourceContent: LEAF_CONTENT,
+      raw: LEAF_CONTENT,
+      fixMarkup: async (markup) => markup.replace('BAD', 'FIXED'),
+      // Verified, not assumed clean: a candidate that still reports items is
+      // exactly the "correction does not resolve the finding" case.
+      validateMarkup: async () => ({ ok: true, data: { summary: { blocks: 1 }, items: [{ status: 'invalid' }] } }),
+      conformToSource: (s) => s,
+    });
+    expect(result).toBeNull();
+  });
+
+  it('returns the conformed corrected inner content when the spliced candidate validates clean', async () => {
+    const { node, searchSpan } = await leafNodeAndSpan();
+    const result = await resolveMatch({
+      node,
+      searchSpan,
+      sourceContent: LEAF_CONTENT,
+      raw: LEAF_CONTENT,
+      fixMarkup: async (markup) => markup.replace('BAD', 'FIXED'),
+      validateMarkup: async () => ({ ok: true, data: { summary: { blocks: 1 }, items: [] } }),
+      conformToSource: (s) => s,
+    });
+    expect(result).toBe('<h2>FIXED</h2>');
   });
 });

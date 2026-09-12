@@ -88,10 +88,16 @@ export function describeCode(code) {
 
 /**
  * @param {string} code one of FINDING_CODES
- * @param {{file?: string, line?: number, blockName?: string, detail?: string, search?: string|null}} overrides
+ * @param {{file?: string, line?: number, blockName?: string, detail?: string, search?: string|null, match?: string|null}} overrides
  *   `search` is the byte-exact source text the finding is about, so a consumer
  *   can find-and-replace it. It is byte-exact or absent, never a best-effort
  *   approximation — see `docs/adr/0002-search-is-byte-exact-or-absent.md`.
+ *   `match` is the verified replacement text for `search` — together they are
+ *   an LSP-style `TextEdit` expressed as text. Only ever populated for a leaf
+ *   `BLOCK_INVALID` finding under `--suggest`, and only once the splice has
+ *   been re-validated clean; `null` otherwise, including on every plain
+ *   (non-`--suggest`) run, so the field's presence is stable even though the
+ *   cost of computing it is opt-in.
  */
 export function makeFinding(code, overrides = {}) {
   const def = REGISTRY[code];
@@ -106,6 +112,7 @@ export function makeFinding(code, overrides = {}) {
     blockName: overrides.blockName,
     message: def.message(overrides),
     search: overrides.search == null ? null : overrides.search,
+    match: overrides.match == null ? null : overrides.match,
     fix: def.fix(overrides),
   };
 }
