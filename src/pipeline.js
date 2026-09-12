@@ -1,5 +1,12 @@
 import fs from 'node:fs/promises';
-import { extractPhpHeader, scanForEmbeddedPhp, maskEmbeddedPhp } from './php-fragment.js';
+import {
+  extractPhpHeader,
+  scanForEmbeddedPhp,
+  maskEmbeddedPhp,
+  findTrailingPhpSection,
+  maskTrailingPhp,
+  firstPhpOpenerIndex,
+} from './php-fragment.js';
 import { runStructuralLayer, BLOCKING_STRUCTURAL_CODES } from './structural.js';
 import { validateMarkup, fixMarkup } from './block-runner-adapter.js';
 import { makeFinding } from './findings.js';
@@ -132,10 +139,34 @@ export async function validateFile(filePath, options = {}) {
   // Masking is length-preserving, so one set of offsets indexes both.
   let unmaskedBody = raw;
   let hasEmbeddedPhp = false;
+  // Set only when this file's trailing PHP section (wpbg-zxg) is the *entire*
+  // body — no markup precedes it. Read by the structural-findings loop below
+  // to suppress STRUCTURAL_NO_BLOCKS, which cannot see *why* the body came up
+  // empty and would otherwise report a false "unconverted Classic/HTML"
+  // verdict for a file that is legitimately all PHP. Deliberately narrower
+  // than "a trailing section exists": a file with real, blockless HTML
+  // *followed by* a trailing PHP section still deserves the genuine
+  // STRUCTURAL_NO_BLOCKS finding for that HTML.
+  let isEntirelyPhp = false;
 
   // --- Layer 0: PHP fragment extraction and flagging ---
   if (isPhp) {
-    const extracted = extractPhpHeader(raw);
+    // Run the trailing-section scan on the raw file *before* stripping a
+    // leading header. extractPhpHeader's header regex is a lazy match for
+    // "<?php ... ?>" and can be fooled by the exact same quoted/commented
+    // "?>" that this scan is built to see through (e.g. a file whose only
+    // "?>" sits inside a string literal): it would then strip a bogus
+    // "header" that actually swallows the true opener, hiding it from every
+    // later check. If the trailing section this scan finds starts at the
+    // file's very first PHP opener, there is no real leading header to
+    // extract — skip extractPhpHeader entirely for this file and treat the
+    // whole thing as body, rather than widening LEADING_HEADER_RE itself
+    // (which would change header/--fix semantics for every pattern file).
+    const rawTrailing = findTrailingPhpSection(raw);
+    const firstOpenerIndex = firstPhpOpenerIndex(raw);
+    const bypassHeader = rawTrailing != null && firstOpenerIndex != null && rawTrailing.index === firstOpenerIndex;
+
+    const extracted = bypassHeader ? { header: null, body: raw, headerLines: 0 } : extractPhpHeader(raw);
     header = extracted.header || '';
     headerLines = extracted.headerLines;
     body = extracted.body;
@@ -149,7 +180,16 @@ export async function validateFile(filePath, options = {}) {
       );
     }
 
-    const embedded = scanForEmbeddedPhp(body);
+    // Re-locate the trailing section relative to `body`: when a header was
+    // stripped, `rawTrailing`'s offset (measured against `raw`) no longer
+    // lines up with `body`.
+    const trailing = bypassHeader ? rawTrailing : findTrailingPhpSection(body);
+
+    // Anything scanForEmbeddedPhp finds at or after the trailing section's
+    // start is inside that same to-EOF PHP run, not a second, independent
+    // occurrence — filter it out so it is reported once, as
+    // PHP_TRAILING_SECTION, not twice.
+    const embedded = scanForEmbeddedPhp(body).filter((o) => !trailing || o.index < trailing.index);
     if (embedded.length > 0) {
       hasEmbeddedPhp = true;
       for (const occurrence of embedded) {
@@ -163,11 +203,37 @@ export async function validateFile(filePath, options = {}) {
       }
       body = maskEmbeddedPhp(body);
     }
+
+    if (trailing) {
+      hasEmbeddedPhp = true;
+      const beforeTrailing = body.slice(0, trailing.index);
+      isEntirelyPhp = beforeTrailing.trim().length === 0;
+      const detail = isEntirelyPhp
+        ? 'File is entirely PHP; no block markup to validate.'
+        : 'File ends in an unclosed "<?php" section; everything from here to EOF is PHP and was not validated as markup.';
+      findings.push(
+        makeFinding('PHP_TRAILING_SECTION', {
+          file: filePath,
+          line: trailing.line + headerLines,
+          detail,
+          search: trailing.token,
+        })
+      );
+      body = maskTrailingPhp(body, trailing.index);
+    }
   }
 
   // --- Layer 1: structural delimiter pre-check ---
   const structuralFindings = runStructuralLayer(body);
   for (const sf of structuralFindings) {
+    // structural.js cannot see *why* the body has no blocks; when the whole
+    // file is PHP, PHP_TRAILING_SECTION above already explains the absence
+    // and STRUCTURAL_NO_BLOCKS's "stored as unconverted Classic/HTML" message
+    // would be false for a file containing no HTML at all. Gated on
+    // `isEntirelyPhp`, not merely "a trailing section exists": a file with
+    // real, blockless HTML *followed by* a trailing PHP section still has a
+    // genuine STRUCTURAL_NO_BLOCKS to report for that HTML.
+    if (isEntirelyPhp && sf.code === 'STRUCTURAL_NO_BLOCKS') continue;
     findings.push(
       makeFinding(sf.code, {
         file: filePath,

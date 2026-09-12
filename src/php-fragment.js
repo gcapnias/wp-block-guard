@@ -11,6 +11,17 @@
 // numbers) before the remainder is handed to the structural and block-runner
 // layers, so those layers never silently validate through PHP interpolation
 // pretending it is a stable HTML region.
+//
+// A third case (wpbg-zxg): a "<?php"/"<?=" opener with no matching "?>" at all
+// runs to EOF exactly as the PHP interpreter treats it — everything after it
+// is PHP source, not candidate markup. `findTrailingPhpSection` detects that
+// with a small hand-rolled state machine (not the regex above, and not a
+// closer/opener *count*: both "<?php" and "?>" appear inside string literals,
+// comments, and heredocs, so a naive scan or counter is fooled by e.g.
+// `echo "?>";` into believing the section already closed). The state machine
+// tracks single/double-quoted strings, line comments, block comments, and
+// heredoc/nowdoc bodies as PHP itself does, so a quoted "?>" is not mistaken
+// for the real closer.
 
 const LEADING_HEADER_RE = /^﻿?\s*<\?php[\s\S]*?\?>\s*\n?/;
 const PHP_TAG_TOKEN_RE = /<\?(?:php\b|=)?|\?>/g;
@@ -81,14 +92,179 @@ export function scanForEmbeddedPhp(body) {
 }
 
 /**
- * Replace every "<?...?>" region with whitespace of the same shape (newlines
- * preserved, everything else blanked) so downstream line/column numbers for
- * the surrounding markup stay accurate. A "<?php"/"<?=" with no matching "?>"
- * before EOF is left untouched — it will usually surface as a structural or
- * block-runner finding on its own, which is an acceptable fallback for that
- * rare malformed case.
+ * Replace every balanced "<?...?>" region with whitespace of the same shape
+ * (newlines preserved, everything else blanked) so downstream line/column
+ * numbers for the surrounding markup stay accurate. A "<?php"/"<?=" with no
+ * matching "?>" before EOF is left untouched by this function — that is
+ * `findTrailingPhpSection` / `maskTrailingPhp`'s job (wpbg-zxg): PHP itself
+ * runs such an opener to EOF, so masking it is a distinct, whole-tail
+ * operation, not a fourth case of "balanced region".
  * @param {string} body
  */
 export function maskEmbeddedPhp(body) {
   return body.replace(PHP_TAG_BLOCK_RE, (m) => m.replace(/[^\n]/g, ' '));
+}
+
+const OPENER_ONLY_RE = /<\?(?:php\b|=)?/g;
+
+/**
+ * Index of the first "<?php"/"<?=" opener anywhere in content, or null if
+ * there is none. Exposed so a caller (src/pipeline.js) can tell whether a
+ * `findTrailingPhpSection` result IS that very first opener — i.e. the
+ * file's only PHP is one big unclosed section, so any "header" a bare regex
+ * match thinks it found ahead of it must be spurious — without re-deriving
+ * opener detection itself.
+ * @param {string} content
+ * @returns {number | null}
+ */
+export function firstPhpOpenerIndex(content) {
+  const m = /<\?(?:php\b|=)?/.exec(content);
+  return m ? m.index : null;
+}
+
+/**
+ * Find a trailing, unclosed PHP section: a "<?php"/"<?=" opener for which no
+ * matching "?>" exists anywhere after it before EOF, as the PHP interpreter
+ * itself would parse it — not by counting "<?"/"?>" tokens (both appear
+ * inside string literals, comments, and heredocs; `echo "?>";` would
+ * false-close a counter) but by walking the body the way the PHP tokenizer
+ * does: track single/double-quoted strings (with backslash escapes), "//"
+ * and "#" line comments (which PHP itself ends at end-of-line **or** "?>",
+ * whichever comes first — so a real "?>" inside a line comment does close
+ * the tag), "/* *\/" block comments, and heredoc/nowdoc bodies (terminated
+ * by a line starting with the declared identifier), none of which admit a
+ * "?>" found inside them as a real closer.
+ *
+ * Only the *first* unclosed opener is reported: once one is found, PHP itself
+ * is already running to EOF from that point, so anything after it —
+ * including further "<?php"/"?>"-shaped text — is inside that same trailing
+ * run, not a second occurrence.
+ *
+ * @param {string} body
+ * @returns {{ index: number, line: number, token: string } | null}
+ */
+export function findTrailingPhpSection(body) {
+  const n = body.length;
+  let i = 0;
+
+  while (i < n) {
+    OPENER_ONLY_RE.lastIndex = i;
+    const opener = OPENER_ONLY_RE.exec(body);
+    if (!opener) return null;
+
+    const openerIndex = opener.index;
+    const openerToken = opener[0];
+    let p = openerIndex + openerToken.length;
+    let closed = false;
+
+    while (p < n) {
+      const ch = body[p];
+
+      if (ch === "'" || ch === '"') {
+        const quote = ch;
+        p++;
+        while (p < n && body[p] !== quote) {
+          if (body[p] === '\\') p++;
+          p++;
+        }
+        p++; // past closing quote (or past EOF if unterminated)
+        continue;
+      }
+
+      if (ch === '/' && body[p + 1] === '*') {
+        const end = body.indexOf('*/', p + 2);
+        if (end === -1) {
+          p = n;
+          break;
+        }
+        p = end + 2;
+        continue;
+      }
+
+      if ((ch === '/' && body[p + 1] === '/') || ch === '#') {
+        // PHP: a "//" or "#" comment ends at end-of-line OR "?>", whichever
+        // comes first — so a real "?>" here does close the tag.
+        let lineEnd = body.indexOf('\n', p);
+        if (lineEnd === -1) lineEnd = n;
+        const closerInLine = body.indexOf('?>', p);
+        if (closerInLine !== -1 && closerInLine < lineEnd) {
+          p = closerInLine; // loop back around; next iteration sees the "?>"
+        } else {
+          p = lineEnd;
+        }
+        continue;
+      }
+
+      if (body.startsWith('<<<', p)) {
+        const heredocEnd = skipHeredoc(body, p);
+        if (heredocEnd == null) {
+          p = n;
+          break;
+        }
+        p = heredocEnd;
+        continue;
+      }
+
+      if (ch === '?' && body[p + 1] === '>') {
+        p += 2;
+        closed = true;
+        break;
+      }
+
+      p++;
+    }
+
+    if (!closed) {
+      const line = body.slice(0, openerIndex).split('\n').length;
+      return { index: openerIndex, line, token: openerToken };
+    }
+
+    i = p;
+  }
+
+  return null;
+}
+
+/**
+ * Advance past a heredoc/nowdoc body (`<<<ID` / `<<<'ID'` / `<<<"ID"`,
+ * starting at `start`), returning the index just after its terminating
+ * `ID`, or `null` if no terminator is found before EOF.
+ * @param {string} body
+ * @param {number} start index of the leading "<<<"
+ * @returns {number | null}
+ */
+function skipHeredoc(body, start) {
+  let q = start + 3;
+  while (/[ \t]/.test(body[q] || '')) q++;
+  let quote = null;
+  if (body[q] === "'" || body[q] === '"') {
+    quote = body[q];
+    q++;
+  }
+  const idStart = q;
+  while (/[A-Za-z0-9_]/.test(body[q] || '')) q++;
+  const id = body.slice(idStart, q);
+  if (!id) return null;
+  if (quote && body[q] === quote) q++;
+
+  let nl = body.indexOf('\n', q);
+  if (nl === -1) return null;
+  const rest = body.slice(nl + 1);
+  const terminatorRe = new RegExp(`^[ \\t]*${id}\\b`, 'm');
+  const match = terminatorRe.exec(rest);
+  if (!match) return null;
+  return nl + 1 + match.index + match[0].length;
+}
+
+/**
+ * Mask a trailing unclosed PHP section (as found by `findTrailingPhpSection`)
+ * from its opener through EOF, using the same same-shaped-whitespace
+ * technique as `maskEmbeddedPhp` (blank everything, preserve newlines) so
+ * line/column numbers for markup *above* the section are untouched.
+ * @param {string} body
+ * @param {number} index start of the trailing section
+ * @returns {string}
+ */
+export function maskTrailingPhp(body, index) {
+  return body.slice(0, index) + body.slice(index).replace(/[^\n]/g, ' ');
 }

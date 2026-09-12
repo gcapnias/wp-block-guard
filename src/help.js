@@ -74,7 +74,13 @@ INPUT TYPES
           PHP_INTERPOLATION_UNCHECKED and masked out before the rest of the
           file is checked — that content is not statically checkable by
           this tool or by block-runner, and a passing result elsewhere in
-          the file is not proof that region is safe.
+          the file is not proof that region is safe. A "<?php"/"<?=" opener
+          with no matching "?>" runs to EOF exactly as PHP itself treats it:
+          everything from there on is reported once as PHP_TRAILING_SECTION
+          and masked, rather than validated as markup — including the case
+          where the whole file is ordinary PHP with no block markup at all
+          (an ordinary functions.php, say), which passes with that one
+          warning instead of a false structural error.
 
 EXIT CODES
   0   All files passed (no error-severity findings; no warnings if --strict).

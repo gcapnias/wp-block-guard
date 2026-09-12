@@ -49,9 +49,13 @@ qualification on findings.
 
 ### `php-fragment.test.js`
 
-Unit tests against inline strings for `extractPhpHeader`, `scanForEmbeddedPhp`, and
-`maskEmbeddedPhp`: header stripping, single-occurrence-per-tag reporting (short-echo
-tags, multiple tags, unterminated openers).
+Unit tests against inline strings for `extractPhpHeader`, `scanForEmbeddedPhp`,
+`maskEmbeddedPhp`, `findTrailingPhpSection`, and `maskTrailingPhp`: header stripping,
+single-occurrence-per-tag reporting (short-echo tags, multiple tags, unterminated
+openers), and trailing-section detection (wpbg-zxg) — including that a `?>` inside a
+string literal, block comment, line comment, or heredoc body is not mistaken for the
+real closer, and that a real closer inside a line comment correctly *is* treated as one
+(PHP's own rule for `//`/`#` comments).
 
 ### `pipeline.test.js`
 
@@ -102,13 +106,20 @@ Each fixture's expected findings were verified empirically by running
 | `deeply-nested-mismatched-closer.html` | `wp:group > wp:columns > wp:column` (3 levels), with `/wp:columns` and `/wp:column` closed out of order | `STRUCTURAL_MISMATCHED_CLOSER` (x2), `BLOCK_RUNNER_SKIPPED` |
 | `interpolated-delimiter-attrs.php` | `<?php ?>` interpolated **inside a delimiter comment's attribute JSON** — the only shape where slicing `search` from the PHP-masked body differs from the original | `PHP_HEADER_STRIPPED`, `PHP_INTERPOLATION_UNCHECKED`, `STRUCTURAL_INVALID_ATTRS_JSON` (the masked JSON no longer parses), `BLOCK_RUNNER_SKIPPED` |
 | `invalid-parent-valid-child.html` | `core/group` missing its `wp-block-group` class, wrapping a **valid** `core/paragraph` child — the only fixture exercising `match`'s children-gate (wpbg-lsf): the parent is a real, otherwise-fixable near-miss, but has children, so `match` must be `null` | `BLOCK_INVALID` (the group only; the child is clean) |
+| `trailing-php-after-markup.php` (wpbg-zxg) | Valid-looking `core/heading` markup (actually invalid — missing `wp-block-heading` class) followed by a `<?php` opener with no closer, containing a `<!-- wp:paragraph -->` string literal. Case A: the trailing section is masked to EOF instead of validated, so the real `core/heading` defect surfaces instead of being hidden behind a false structural error | `PHP_TRAILING_SECTION`, `BLOCK_INVALID` (no `STRUCTURAL_UNBALANCED_DELIMITER`, no `BLOCK_RUNNER_SKIPPED`) |
+| `trailing-php-entire-file.php` (wpbg-zxg) | A `functions.php`-shaped file: `<?php` opener, never closed, no block markup anywhere — the higher-impact case, a theme file globbed by mistake | `PHP_TRAILING_SECTION` only (no `STRUCTURAL_NO_BLOCKS`); `ok: true`, exit 0 |
+| `trailing-php-quoted-closer.php` (wpbg-zxg) | Same shape as `trailing-php-entire-file.php`, but the PHP body itself contains a quoted `"?>"` string literal before the real (missing) closer — regression fixture proving trailing-section detection is not a naive `<?`/`?>` token count, which a quoted `?>` would falsely close | `PHP_TRAILING_SECTION` only; no `PHP_HEADER_STRIPPED` (the quoted `?>` must not be mistaken for a real header closer), no `STRUCTURAL_UNBALANCED_DELIMITER` |
+| `trailing-short-echo-no-content.php` (wpbg-zxg) | Valid heading markup followed by a bare, unclosed `<?=` at EOF with nothing after it — case C, the one shape that must NOT start reporting differently: still passes, exit 0, no structural error (only the finding *code* changed, from `PHP_INTERPOLATION_UNCHECKED` to `PHP_TRAILING_SECTION`, per the decided design) | `PHP_TRAILING_SECTION` only |
+| `trailing-php-after-no-blocks.php` (wpbg-zxg) | Real, blockless `<p>Hello</p>` HTML followed by an unrelated trailing PHP section — regression fixture proving the `STRUCTURAL_NO_BLOCKS` suppression is scoped to "the file is entirely PHP", not "a trailing section exists anywhere": genuine unconverted-HTML content must still be reported | `PHP_TRAILING_SECTION`, `STRUCTURAL_NO_BLOCKS` (both) |
 
 When adding a fixture, run it through the CLI with `--json` first and copy the actual
 output into the test assertion — do not guess expected findings.
 
 ## Coverage snapshot
 
-4 test files, 43 tests, all passing as of the last full run. No tests are skipped.
+6 test files, 157 tests, all passing as of the last full run (up from 139 before
+wpbg-zxg added `findTrailingPhpSection`/`maskTrailingPhp` unit tests and the
+trailing-PHP-section integration tests). No tests are skipped.
 
 ## Known gaps
 

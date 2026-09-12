@@ -75,6 +75,28 @@ accurate) and flags `PHP_INTERPOLATION_UNCHECKED`.
 _Avoid_: Inline PHP, dynamic PHP (used loosely in prose but "embedded PHP" is the
 canonical term tied to the finding code).
 
+**Trailing PHP section** (wpbg-zxg):
+A third, distinct PHP situation, neither a header nor embedded PHP: a `<?php`/`<?=`
+opener with no matching `?>` anywhere before EOF. PHP itself runs such an opener to
+EOF — everything after it is PHP source, not candidate markup — so Layer 0 masks
+opener-to-EOF (same-shaped whitespace, same technique as embedded PHP) and flags
+`PHP_TRAILING_SECTION` once, rather than validating PHP source as if it might be block
+markup. This can be the entire file (an ordinary `functions.php`-shaped file globbed by
+mistake), in which case the file passes with only that one warning and no
+`STRUCTURAL_NO_BLOCKS` (a body that is empty *because it was PHP* is not the same claim
+as "unconverted Classic/HTML"). Detected by a small state machine that tracks PHP
+string/comment/heredoc syntax — not by counting `<?`/`?>` tokens, which both appear
+inside string literals and comments and would be fooled by e.g. `echo "?>";`. This does
+**not** widen the "PHP fragment" scope boundary above: the tool still only understands
+the header-wrapped pattern-file shape and this one to-EOF case, not arbitrary PHP
+control flow or output. Conceptually distinct from "embedded PHP" (a self-contained
+tag mid-markup vs. an opener with no closer at all), but deliberately routed through
+the same `--fix`/`--suggest` safety gate as embedded PHP in `src/pipeline.js`: neither
+can be safely auto-fixed, so both decline with the same "not safely auto-fixable"
+reason rather than needing a second gate.
+_Avoid_: Unclosed PHP tag (imprecise — the finding is about everything the missing
+closer implies runs to EOF, not just the tag itself).
+
 **save() diff**:
 The actual check Layer 2 (block-runner) performs: whether a block's stored markup
 still matches what its React `save()` function would currently render. A mismatch is

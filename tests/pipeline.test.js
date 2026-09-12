@@ -120,6 +120,108 @@ describe('validateFile — PHP fragments', () => {
   });
 });
 
+describe('validateFile — PHP trailing section (wpbg-zxg)', () => {
+  it('masks a trailing unclosed <?php to EOF and still validates the real markup above it', async () => {
+    // Case A: today (pre-fix) a false STRUCTURAL_UNBALANCED_DELIMITER fires
+    // on the "<!-- wp:paragraph -->" *string literal* inside the trailing
+    // PHP, which cascades into BLOCK_RUNNER_SKIPPED and hides the genuinely
+    // invalid core/heading above. Verified via CLI --json before writing
+    // this assertion.
+    const result = await validateFile(fx('trailing-php-after-markup.php'));
+    const codes = result.findings.map((f) => f.code);
+
+    expect(codes).toContain('PHP_TRAILING_SECTION');
+    expect(codes).not.toContain('STRUCTURAL_UNBALANCED_DELIMITER');
+    expect(codes).not.toContain('BLOCK_RUNNER_SKIPPED');
+
+    const trailing = result.findings.find((f) => f.code === 'PHP_TRAILING_SECTION');
+    expect(trailing.message).toBe(
+      'File ends in an unclosed "<?php" section; everything from here to EOF is PHP and was not validated as markup.'
+    );
+    expect(trailing.search).toBe('<?php');
+    expect(trailing.fix).toBe(
+      'This is normal PHP. If block markup was meant to follow, close the section with "?>" first.'
+    );
+
+    const invalid = result.findings.find((f) => f.code === 'BLOCK_INVALID');
+    expect(invalid).toBeDefined();
+    expect(invalid.blockName).toBe('core/heading');
+    expect(result.ok).toBe(false);
+  });
+
+  it('declines --fix/--suggest for a trailing PHP section, reusing the embedded-PHP skip reason (match stays null)', async () => {
+    // Acceptance criterion: a future gate change must not silently start
+    // "fixing" past a trailing PHP section without a deliberate decision to
+    // do so (wpbg-lsf's suggest && !hasEmbeddedPhp gate covers this case
+    // too, since the trailing section sets hasEmbeddedPhp).
+    const suggested = await validateFile(fx('trailing-php-after-markup.php'), { suggest: true });
+    expect(suggested.suggestedOutput).toBeNull();
+    expect(suggested.fixSkippedReason).toMatch(/embedded PHP/i);
+
+    const invalid = suggested.findings.find((f) => f.code === 'BLOCK_INVALID');
+    expect(invalid).toBeDefined();
+    expect(invalid.match).toBeNull();
+  });
+
+  it('passes clean, exit-0-shaped, for a file that is entirely PHP with no block markup', async () => {
+    // Case B: the functions.php shape. Must not emit STRUCTURAL_NO_BLOCKS —
+    // its "stored as unconverted Classic/HTML" message would be false for a
+    // file containing no HTML at all; PHP_TRAILING_SECTION alone explains
+    // the empty body.
+    const result = await validateFile(fx('trailing-php-entire-file.php'));
+    expect(result.ok).toBe(true);
+    expect(result.summary).toEqual({ errors: 0, warnings: 1 });
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]).toMatchObject({
+      code: 'PHP_TRAILING_SECTION',
+      severity: 'warning',
+      message: 'File is entirely PHP; no block markup to validate.',
+    });
+  });
+
+  it('does not mistake a "?>" inside a PHP string literal for the real closer', async () => {
+    // The exact case token-counting was rejected for: a naive opener/closer
+    // count would treat the quoted "?>" as the real closer and go on to
+    // (falsely) validate the "<!-- wp:heading -->" string as markup.
+    const result = await validateFile(fx('trailing-php-quoted-closer.php'));
+    expect(result.ok).toBe(true);
+    const codes = result.findings.map((f) => f.code);
+    expect(codes).toEqual(['PHP_TRAILING_SECTION']);
+    expect(codes).not.toContain('PHP_HEADER_STRIPPED');
+    expect(codes).not.toContain('STRUCTURAL_UNBALANCED_DELIMITER');
+    expect(result.findings[0].message).toBe('File is entirely PHP; no block markup to validate.');
+  });
+
+  it('still reports STRUCTURAL_NO_BLOCKS for real blockless HTML that happens to precede a trailing PHP section', async () => {
+    // Code-review regression: the suppression must be scoped to "the file is
+    // entirely PHP", not "a trailing section exists anywhere in the file" —
+    // otherwise a file with genuine, unconverted HTML ahead of an unrelated
+    // trailing PHP section would have its real STRUCTURAL_NO_BLOCKS finding
+    // silently swallowed too.
+    const result = await validateFile(fx('trailing-php-after-no-blocks.php'));
+    const codes = result.findings.map((f) => f.code);
+    expect(codes).toContain('PHP_TRAILING_SECTION');
+    expect(codes).toContain('STRUCTURAL_NO_BLOCKS');
+    expect(result.ok).toBe(true);
+    expect(result.summary).toEqual({ errors: 0, warnings: 2 });
+  });
+
+  it('still reports an unclosed short-echo tag at EOF with no content after it (case C)', async () => {
+    // Regression fixture for the one shape that must NOT start reporting
+    // once this ticket's fix lands: an unclosed opener with nothing after
+    // it. It already passed before this change (as PHP_INTERPOLATION_UNCHECKED);
+    // the decided design (wpbg-zxg) reassigns it to PHP_TRAILING_SECTION
+    // instead of a second code, but the outcome — clean pass, exit 0, no
+    // structural error, no BLOCK_RUNNER_SKIPPED — is unchanged.
+    const result = await validateFile(fx('trailing-short-echo-no-content.php'));
+    expect(result.ok).toBe(true);
+    const codes = result.findings.map((f) => f.code);
+    expect(codes).toEqual(['PHP_TRAILING_SECTION']);
+    expect(codes).not.toContain('STRUCTURAL_UNBALANCED_DELIMITER');
+    expect(codes).not.toContain('BLOCK_RUNNER_SKIPPED');
+  });
+});
+
 describe('validateFile — --fix', () => {
   const tmpFiles = [];
 

@@ -20,6 +20,18 @@ const REGISTRY = {
       'Move dynamic PHP logic outside block boundaries, or review this section by hand. A passing result elsewhere in this file is not proof this region is safe.',
   },
 
+  PHP_TRAILING_SECTION: {
+    severity: 'warning',
+    // `detail` is supplied by the caller (src/pipeline.js), which is the one
+    // that knows whether any markup preceded the unclosed opener — this
+    // entry only supplies a safe fallback wording, matching how
+    // STRUCTURAL_MISMATCHED_CLOSER varies its text.
+    message: (o) =>
+      o.detail ||
+      'File ends in an unclosed "<?php" section; everything from here to EOF is PHP and was not validated as markup.',
+    fix: () => 'This is normal PHP. If block markup was meant to follow, close the section with "?>" first.',
+  },
+
   STRUCTURAL_UNBALANCED_DELIMITER: {
     severity: 'error',
     message: (o) => `Block "${o.blockName}" is opened but never closed.`,

@@ -169,6 +169,7 @@ explanation: run `wp-block-guard --help`, or see the `REGISTRY` in [`src/finding
 | --- | --- | --- |
 | `PHP_HEADER_STRIPPED` | info | Leading `<?php ... ?>` header removed before validation, re-attached unchanged. |
 | `PHP_INTERPOLATION_UNCHECKED` | warning | PHP tag found mid-markup; that region could not be statically checked. |
+| `PHP_TRAILING_SECTION` | warning | File ends in an unclosed `<?php`/`<?=`; everything from there to EOF is PHP (possibly the whole file) and was not validated as markup. |
 | `STRUCTURAL_UNBALANCED_DELIMITER` | error | A block comment was opened but never closed. |
 | `STRUCTURAL_MISMATCHED_CLOSER` | error | A closing comment doesn't match the innermost open block. |
 | `STRUCTURAL_INVALID_ATTRS_JSON` | error | A block delimiter's attribute JSON does not parse. |
