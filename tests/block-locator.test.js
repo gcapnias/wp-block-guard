@@ -212,9 +212,11 @@ describe('resolveMatch', () => {
       conformToSource: (s) => s,
     });
 
-    // The gate short-circuits before canonicalization is even attempted —
-    // splicing a parent's canonicalized-alone form back in would silently
-    // destroy its children, so it must never get that far.
+    // The gate short-circuits before canonicalization is even attempted — a
+    // parent's `match` is out of scope regardless of what canonicalizing it
+    // would produce (recursive re-serialization makes that unverifiable, not
+    // destructive; see resolveMatch()'s docstring), so it must never get
+    // that far.
     expect(result).toBeNull();
     expect(fixMarkupCalled).toBe(false);
   });

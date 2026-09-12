@@ -171,11 +171,20 @@ export async function resolveItemLines({ content, items, validateMarkup }) {
  * Compute the verified replacement text for a leaf `BLOCK_INVALID` finding —
  * the `match` half of a `{ search, match }` `TextEdit`.
  *
- * `null` for a block with children, unconditionally: validating a block in
- * isolation strips its inner blocks (see `shallowMarkup()` above), so
- * canonicalizing a parent comes back with its children gone, and splicing
- * that in would silently destroy them. Nested-parent support is out of scope
- * here (wpbg-hdl).
+ * `null` for a block with children, unconditionally — a settled ceiling
+ * (wpbg-hdl), not a pending limitation. Canonicalizing a parent does not
+ * strip its children (that is `shallowMarkup()` above, for the unrelated
+ * purpose of isolating a *verdict*); it recursively re-serializes every
+ * descendant, the way Gutenberg's `canonicalize`/`save()` does for any markup
+ * spanning more than one block. Whether a given descendant's bytes survive
+ * that re-serialization unchanged depends on whether the source's existing
+ * formatting already matches what the serializer would emit for that block
+ * type — not on where the defect lives — and that is only knowable by doing
+ * the rewrite and diffing it, the exact ambiguity `match` exists to avoid
+ * answering by inspection. So a parent's `match` would be a bulk,
+ * unverifiable rewrite of its whole subtree masquerading as a `TextEdit`. See
+ * docs/adr/0002-search-is-byte-exact-or-absent.md (2026-09-12 amendment) for
+ * the full record.
  *
  * For a leaf, canonicalizes the block alone, re-conforms the *whole*
  * canonicalized block to the file's own line-ending convention (not just the
