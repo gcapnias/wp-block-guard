@@ -1,6 +1,8 @@
-# Findings do not carry corrected markup
+# Corrected markup in a finding must be verified, or absent
 
-Status: accepted — cost rationale amended 2026-09-04; isolation blocker resolved 2026-09-05
+Status: accepted — cost rationale amended 2026-09-04; isolation blocker resolved 2026-09-05;
+prohibition narrowed to a verification requirement 2026-09-12 (wpbg-lsf shipped `match`; see
+Amendment below)
 
 We deliberately do not add a `match` field holding the corrected markup for a flagged
 block, even though it is the obvious companion to `search`. The reasons are correctness
@@ -73,3 +75,38 @@ Some findings have no correction available even in principle — markup carrying
 own answer to this class is to let a block declare it cannot round trip, not to synthesise
 a fix. Any future attempt here should expect `null` for a meaningful share of findings
 rather than treat it as a gap to close.
+
+## Amendment (2026-09-12): `match` exists — the objection was satisfied, not overturned
+
+wpbg-lsf added `match` to `BLOCK_INVALID` findings: the verified replacement text for
+`search`, together forming an LSP-style `TextEdit` expressed as text (`src/findings.js`).
+This ADR's original title was a flat "no" to exactly that field, and that "no" is no
+longer literally true, so the title above has been changed to say what still holds.
+
+What this ADR actually argued was never "corrected markup must never appear in a
+finding" for its own sake — it was that an *unverified* correction is a liability,
+because a consumer applying it unattended cannot tell a real fix from a guess. That is
+the same honesty principle `docs/adr/0002-search-is-byte-exact-or-absent.md` states for
+`search`: a wrong value is worse than a missing one, so `null` is the honest answer
+whenever certainty isn't there. wpbg-lsf did not decide that principle no longer
+applies to corrected markup; it built `match` to satisfy it.
+
+Concretely, `resolveMatch()` (`src/block-locator.js`) never returns computed replacement
+text on the strength of the computation alone. It only ever returns text after splicing
+the candidate back into the block's own delimiters and re-validating that whole
+candidate from scratch; anywhere that re-validation does not come back clean — the
+splice still reports findings, resolves to other than exactly one block, or the
+canonicalization step it depends on produced nothing usable — it returns `null` instead.
+The two obstacles this ADR flagged as unresolved (canonicalization is not
+byte-preserving; some blocks have no `save()`-compatible correction at all) are exactly
+why that verification step exists and cannot be skipped, not evidence against it: they
+are why an unverified guess would sometimes be wrong, and re-validation is what catches
+that before the value ever reaches a finding.
+
+The rule that survives, and binds any future producer of `match` (including any
+extension past today's leaf-only ceiling, tracked separately as wpbg-hdl): **corrected
+markup may appear in a finding only once it has been independently re-validated as
+clean. A computed-but-unverified correction must never be exposed as `match` — it must
+be discarded in favor of `null`, the same way an uncertain `search` is.** Read this ADR
+as the record of why that verification step is load-bearing, not as a prohibition that
+was later dropped.

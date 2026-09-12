@@ -13,9 +13,9 @@ implemented in its own module and each able to short-circuit the layers after it
 _Avoid_: Stage, phase, step.
 
 **Finding**:
-A single reportable result of validation: `{code, severity, line, message, search, fix}`. Every
-layer emits findings; they are the only thing the CLI's JSON output and human report
-are built from.
+A single reportable result of validation: `{code, severity, file, line, blockName, message,
+search, match, fix}`. Every layer emits findings; they are the only thing the CLI's JSON
+output and human report are built from.
 _Avoid_: Error (too narrow — a finding may be info/warning/error), issue, diagnostic.
 
 **line**:
@@ -33,6 +33,28 @@ look for in order to replace it. Absent (`null`) whenever the tool cannot identi
 text with certainty.
 _Avoid_: Source (collides with block-runner's own `source` position object), snippet,
 excerpt, offending text.
+
+**match**:
+The verified replacement text for `search` — together they are an LSP-style `TextEdit`
+expressed as text. Populated only under `--suggest`, and only after the candidate
+correction has been independently re-validated as still clean; a computed-but-unverified
+correction is never surfaced, per
+`docs/adr/0003-no-corrected-markup-in-findings.md`. `null` covers several distinct
+situations, none of which mean the tool failed to try: the finding is not
+`BLOCK_INVALID`; the block has children (leaf-only is the current ceiling); the
+finding's own `search` could not be resolved (the mapping `search` depends on fails
+per-file, not per-finding — see `docs/adr/0002-search-is-byte-exact-or-absent.md`); or a
+correction was computed and failed re-validation. A plain run (no `--suggest`) has
+`match: null` on every finding, keeping the field's presence stable while the cost of
+computing it stays opt-in — and a file with embedded PHP has `match: null` throughout as
+well, because `--suggest`/`--fix` are themselves declined for such a file. `match` is
+agent-surface only: it is present in `--json` output and has no human-report rendering,
+by design rather than omission — see
+`.out-of-scope/agent-output-in-human-report.md` and
+`docs/adr/0006-two-workflows-fix-writes-suggest-returns.md`.
+_Avoid_: Suggestion (that is the whole canonicalized file returned instead of writing;
+`match` is one block's replacement text within a single finding), fix (see Canonicalization),
+correction, patch.
 
 **Code**:
 The stable, namespaced identifier of a finding's kind (e.g. `STRUCTURAL_UNBALANCED_DELIMITER`),
