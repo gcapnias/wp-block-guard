@@ -19,6 +19,12 @@
 // block.attributes)` against `block.originalContent`, and `save()` is invoked
 // with no block context, so nothing outside a block's own delimiter span feeds
 // its validation. So each ambiguous candidate can simply be asked directly.
+//
+// The same isolation fact is what makes `resolveMatch()` below sound (wpbg-lsf):
+// a leaf block canonicalized alone gets the same corrected markup it would get
+// canonicalized in its document, so a block's own verified replacement text —
+// the `match` half of a `{ search, match }` finding — can be computed here too,
+// reusing the node this module already resolves rather than re-walking the tree.
 
 import { buildBlockTree, flattenBlockTree, lineAt } from './structural.js';
 
@@ -66,7 +72,7 @@ function shallowMarkup(content, node) {
  * @param {object} node
  * @returns {{ start: number, end: number }}
  */
-export function markupSpan(content, node) {
+function markupSpan(content, node) {
   if (node.innerStart == null || node.innerEnd == null) return { start: node.start, end: node.end };
   let start = node.innerStart;
   let end = node.innerEnd;

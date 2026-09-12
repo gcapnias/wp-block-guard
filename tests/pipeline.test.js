@@ -763,13 +763,43 @@ describe('validateFile — --suggest match (wpbg-lsf)', () => {
     expect(finding.match).toBeNull();
   }, 45000);
 
-  it('is null under --suggest when embedded PHP makes the whole file not safely auto-fixable', async () => {
-    const tmpFile = await copyToTmp('pattern-with-interpolation.php', 'php');
+  it('is null for a leaf BLOCK_INVALID even when embedded PHP elsewhere blocks --suggest', async () => {
+    // pattern-with-interpolation.php (used by the --suggest describe block
+    // above for the *skip reason* itself) produces no BLOCK_INVALID finding
+    // at all — both its findings are PHP_HEADER_STRIPPED and
+    // PHP_INTERPOLATION_UNCHECKED, which get match: null unconditionally
+    // because they aren't BLOCK_INVALID. Asserting match === null against
+    // that fixture would pass whether or not the suggest && !hasEmbeddedPhp
+    // gate in src/pipeline.js exists at all — the same vacuous-test trap
+    // wpbg-8j7's report caught for one of its own line-ending tests. This
+    // fixture instead combines a genuinely fixable leaf BLOCK_INVALID (a
+    // heading missing its class) with embedded PHP interpolation elsewhere
+    // in the body, confirmed by running it through the CLI first: it yields
+    // BLOCK_INVALID at the heading, with fixSkippedReason naming embedded PHP.
+    const tmpFile = path.join(os.tmpdir(), `wp-block-guard-match-embedded-php-${Date.now()}.php`);
+    tmpFiles.push(tmpFile);
+    const content = [
+      '<?php /* Title: Example */ ?>',
+      '<!-- wp:heading {"level":2} -->',
+      '<h2>Hello World</h2>',
+      '<!-- /wp:heading -->',
+      '<!-- wp:paragraph -->',
+      '<p><?php echo esc_html( $x ); ?></p>',
+      '<!-- /wp:paragraph -->',
+    ].join('\n');
+    await fs.writeFile(tmpFile, content, 'utf8');
+
     const result = await validateFile(tmpFile, { suggest: true });
     expect(result.fixSkippedReason).toMatch(/embedded PHP/i);
-    for (const finding of result.findings) {
-      expect(finding.match).toBeNull();
-    }
+    const invalid = result.findings.find((f) => f.code === 'BLOCK_INVALID');
+    expect(invalid).toBeDefined();
+    expect(invalid.blockName).toBe('core/heading');
+    // The gate matters here: resolveMatch slices the leaf's blockMarkup from
+    // the *unmasked* sourceContent, so without the suggest && !hasEmbeddedPhp
+    // gate it would hand raw, unmasked content (including this file's own
+    // untouched PHP tag elsewhere in the body) to canonicalize — the one
+    // thing this feature exists to never do unverified.
+    expect(invalid.match).toBeNull();
   }, 45000);
 
   it('matches the CRLF input file’s line-ending convention', async () => {
