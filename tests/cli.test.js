@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { normalizePatternsForPlatform } from '../src/cli.js';
+import { normalizePatternsForPlatform, shouldColorize } from '../src/cli.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -243,4 +243,58 @@ describe('CLI --suggest', () => {
     expect(byName['two.html'].suggestedOutput.match(/wp-block-heading/g)).toHaveLength(2);
     expect(byName['clean.html'].suggestedOutput).toBeNull();
   }, 45000);
+});
+
+const ANSI_RE = /\x1b\[\d+m/;
+
+describe('shouldColorize', () => {
+  it('is true only when stdout is a TTY and NO_COLOR is unset', () => {
+    expect(shouldColorize({ isTTY: true, noColor: undefined })).toBe(true);
+  });
+
+  it('is false when stdout is not a TTY', () => {
+    expect(shouldColorize({ isTTY: false, noColor: undefined })).toBe(false);
+  });
+
+  it('is false when NO_COLOR is set to any non-empty value, even on a TTY', () => {
+    expect(shouldColorize({ isTTY: true, noColor: '1' })).toBe(false);
+  });
+
+  it('is true when NO_COLOR is set to an empty string (unset in spirit)', () => {
+    expect(shouldColorize({ isTTY: true, noColor: '' })).toBe(true);
+  });
+});
+
+describe('CLI human output color suppression', () => {
+  // spawnSync pipes stdout, so process.stdout.isTTY is always false in the
+  // child here — these end-to-end runs exercise the non-TTY suppression
+  // path for real; the TTY-enabled path is covered by the formatHuman and
+  // shouldColorize unit tests above, since faking a real TTY end-to-end is
+  // not practical.
+  it('non-TTY (piped) human output has no ANSI escapes', () => {
+    const { stdout } = run([fx('invalid-heading-missing-class.html')]);
+    expect(stdout).not.toMatch(ANSI_RE);
+  });
+
+  it('--json output has no ANSI escapes regardless of NO_COLOR', () => {
+    const result = spawnSync(process.execPath, [BIN, fx('invalid-heading-missing-class.html'), '--json'], {
+      encoding: 'utf8',
+      cwd: ROOT,
+      env: { ...process.env, NO_COLOR: '' },
+    });
+    expect(result.stdout).not.toMatch(ANSI_RE);
+  });
+
+  it('NO_COLOR=1 human output has no ANSI escapes', () => {
+    // Belt-and-suspenders alongside the shouldColorize unit tests: spawnSync
+    // already pipes stdout (non-TTY), so this would pass even without the
+    // NO_COLOR check, but it pins the acceptance criterion end-to-end rather
+    // than only at the unit level.
+    const result = spawnSync(process.execPath, [BIN, fx('invalid-heading-missing-class.html')], {
+      encoding: 'utf8',
+      cwd: ROOT,
+      env: { ...process.env, NO_COLOR: '1' },
+    });
+    expect(result.stdout).not.toMatch(ANSI_RE);
+  });
 });

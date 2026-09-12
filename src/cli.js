@@ -27,6 +27,21 @@ export function normalizePatternsForPlatform(patterns, platform = process.platfo
 }
 
 /**
+ * Whether formatHuman() should emit ANSI color. Suppressed when stdout is
+ * not a TTY (redirected/piped output, e.g. CI logs) or when NO_COLOR is set
+ * to any non-empty value (ecosystem convention, https://no-color.org).
+ * Isolated from process globals here (injectable params, like
+ * normalizePatternsForPlatform above) so tests can assert both states
+ * without faking a real TTY.
+ *
+ * @param {{isTTY?: boolean, noColor?: string}} [env]
+ * @returns {boolean}
+ */
+export function shouldColorize({ isTTY = process.stdout.isTTY, noColor = process.env.NO_COLOR } = {}) {
+  return Boolean(isTTY) && !noColor;
+}
+
+/**
  * @param {string[]} argv arguments, excluding the node/script entries
  * @returns {Promise<number>} the process exit code
  */
@@ -150,7 +165,9 @@ export async function main(argv) {
   if (flags.json) {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   } else {
-    process.stdout.write(`${formatHuman(report, { strict: flags.strict })}\n`);
+    // --json never reaches this branch at all, so no redundant check for it
+    // is needed here.
+    process.stdout.write(`${formatHuman(report, { strict: flags.strict, color: shouldColorize() })}\n`);
   }
 
   if (!report.ok) return 1;
