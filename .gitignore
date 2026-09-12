@@ -178,3 +178,5 @@ sketch
 
 # Compiled standalone executable produced by `npm run compile` (bun build --compile)
 bin/*.exe
+# br doctor per-run artifacts
+.doctor/

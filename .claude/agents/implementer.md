@@ -1,5 +1,5 @@
 ---
-name: software-engineer
+name: implementer
 description: Implement a piece of work based on a spec or set of tickets. Use when the user wants a spec, ticket, or bead built.
 color: orange
 effort: medium
