@@ -9,9 +9,14 @@ npm test
 ```
 
 This runs `vitest run` (see `package.json`). Configuration lives in `vitest.config.js`
-at the repo root: a 20s default per-test timeout (block-runner spawns a real headless
-Gutenberg process per validation call, which is slower than vitest's 5s default), and
-`.claude/worktrees/**` excluded from discovery.
+at the repo root, and is three settings:
+
+- **`testTimeout: 5000`** — vitest's own default. Deliberately *not* raised globally;
+  see "Timeouts and the block-runner boot" below.
+- **`fileParallelism: false`** — test files run one at a time. This is a correctness
+  setting, not a speed one (`wpbg-f06`).
+- **`exclude: [.claude/worktrees/**]`** — those are full nested checkouts with their own
+  `tests/*.test.js`, which vitest would otherwise discover and run.
 
 To run a single file or filter by name:
 
@@ -20,10 +25,73 @@ npx vitest run tests/structural.test.js
 npx vitest run -t "qualifyBlockName"
 ```
 
-Wall-clock time is dominated by real `block-runner` process spawns (~10s steady-state
-each). A full run currently takes ~2 minutes. Tests that perform 2–3 sequential
-block-runner spawns (`--fix` pipeline tests, the `--strict` CLI test) set explicit
-higher per-test timeouts.
+Both work for every test in the suite. Keep it that way: a budget that only holds
+because some *earlier* test warmed block-runner will pass a full run and fail
+`-t "<that case>"`.
+
+## Timeouts and the block-runner boot
+
+`block-runner` loads jsdom + the `@wordpress/*` tree lazily, at its **first
+`validate()` call** — not at import. So the boot lands inside whatever is running at
+the time, and it is paid **once per OS process**
+(`docs/adr/0004-in-process-block-runner-invocation.md`).
+
+Two consequences, and the suite handles them differently:
+
+- **`pipeline.test.js`** calls `validateFile` in-process, so one boot covers the whole
+  file. It is paid in a `beforeAll` warm-up hook, which keeps it out of any individual
+  test's budget and makes every case runnable on its own.
+- **`cli.test.js`** spawns the real binary per case, so each spawn pays a fresh boot in
+  the child. A warm-up cannot help; those describe blocks carry raised budgets instead.
+
+### Measured costs (2026-09-16, 12-core machine)
+
+This table is the single source for the numbers cited in `vitest.config.js`,
+`tests/pipeline.test.js`, and `tests/cli.test.js`. Update it here, not there.
+
+| What | Cost |
+|---|---|
+| `import('block-runner')` | 1.1–1.3s |
+| First `validate()` in a process (the boot) | 8.0–13.9s |
+| Every in-process `validate()` after it | 2–160ms |
+| One block-runner-backed CLI invocation | 8.3–13.0s |
+| Two such invocations in one case (`--strict`) | 16.0–23.1s |
+| CLI invocation that never reaches block-runner | 1.1–2.5s |
+| Full suite, serial | ~119–155s |
+
+Note this re-measures ADR 0004's "11–36ms" figure for post-boot in-process calls; the
+spread is wider (2–160ms) on the fixtures this suite uses, but the conclusion the ADR
+draws from it is unchanged.
+
+### Where raised budgets live, and why
+
+These are **budgets, not costs** — they are sized well above the table above on
+purpose. A timeout here can only ever catch block-runner *hanging*; it cannot
+make the boot faster, so a tight number buys a false red rather than a faster
+signal.
+
+| Location | Budget | Covers |
+|---|---|---|
+| `pipeline.test.js` `beforeAll` | 120s | the one in-process boot |
+| `pipeline.test.js` stderr-containment case | 45s | a boot inside a spawned child |
+| `cli.test.js` three spawning describes | 45s | one boot per case |
+| `cli.test.js` `--strict` case | 90s | two boots back to back |
+
+The warm-up hook's 120s looks wildly out of proportion to a 14s worst-case boot,
+and is deliberate. A 45s budget there **did** time out on one run whose wall
+clock was 226s against ~122s for its neighbours. Two things make the hook a
+special case: the boot's tail is fat and entirely at the mercy of machine load,
+and a *hook* failure fails all 60 tests in the file rather than one. Note that a
+timed-out hook does not appear to cancel the boot already in flight, so such a
+run also pays a long teardown.
+
+A per-case timeout argument (`it(name, fn, ms)`) overrides a describe-level
+`{ timeout }` option — verified against vitest 4.1.11, which is what puts
+`--strict` on 90s rather than its describe's 45s.
+
+Everything else runs on the 5s default, including all 72 cases in
+`structural.test.js`, `php-fragment.test.js`, `report.test.js`, and
+`block-locator.test.js`, and the other 58 cases in `pipeline.test.js`.
 
 ## Structure
 

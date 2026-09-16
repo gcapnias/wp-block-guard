@@ -1,4 +1,4 @@
-import { describe, it, expect, afterAll } from 'vitest';
+import { describe, it, expect, afterAll, beforeAll } from 'vitest';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -10,6 +10,50 @@ import { makeFinding } from '../src/findings.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(__dirname, 'fixtures', 'wp-block-guard');
 const fx = (name) => path.join(FIXTURES, name);
+
+// Budgets, not costs. One block-runner boot measured 8.0-13.9s across every
+// condition exercised here (see tests/README.md).
+//
+// BOOT_BUDGET_MS is deliberately far larger than that 3x-ish headroom would
+// suggest, for two reasons learned the hard way:
+//   1. The boot's duration is entirely at the mercy of machine load, and its
+//      tail is fat. A 45s budget here timed out on a run where the machine
+//      stalled — the same run took 226s wall against ~122s for its nine
+//      neighbours. The suite cannot control that, and failing is not a useful
+//      response to it.
+//   2. A *hook* failure fails every test in the file (60 of them), not one.
+//      That amplification means this budget must be conservative in a way a
+//      per-test budget need not be.
+// Its job is to catch block-runner genuinely hanging, not to police a start-up
+// cost that is known, fixed, and out of scope to fix (README "Known issues").
+const BOOT_BUDGET_MS = 120000; // in-process boot, paid by the warm-up hook
+const SUBPROCESS_BOOT_BUDGET_MS = 45000; // boot inside a spawned CLI child
+
+// Pay block-runner's boot here, in a hook, so that no individual test's budget
+// absorbs it. block-runner loads jsdom + the @wordpress/* tree lazily, at its
+// first validate() call rather than at import, so without this the cost lands
+// inside whichever test happens to run first — which is what made the first
+// case in this file blow a 25s budget under load (wpbg-f06).
+//
+// Doing it here rather than leaving it on the first test buys order
+// independence, and that is not cosmetic: `vitest -t "<one case>"` runs a
+// single case with no predecessor to have warmed anything, so every case in
+// the file has to be able to pay the boot or none of them can be run alone.
+// Inserting a new test above the old first one had the same effect.
+//
+// This is NOT a re-litigation of wpbg-f06 comment #37, which rejected a
+// warm-up hook. That objection was that warming still executes inside the
+// parallel run's contended opening window, so it does not fix *contention* —
+// correct, and it is why vitest.config.js sets fileParallelism: false. The
+// window is gone; this hook fixes *attribution*, which is a different problem.
+// The two are complementary.
+//
+// valid-heading.html specifically: a fixture with a blocking structural error
+// would skip Layer 2 entirely and warm nothing. Asserts nothing on purpose —
+// it is infrastructure, not a test. Timings in tests/README.md.
+beforeAll(async () => {
+  await validateFile(fx('valid-heading.html'));
+}, BOOT_BUDGET_MS);
 
 describe('validateFile — clean cases', () => {
   it('validates a clean core/heading block with no findings', async () => {
@@ -257,7 +301,7 @@ describe('validateFile — --fix', () => {
     const revalidated = await validateFile(tmpFile);
     expect(revalidated.ok).toBe(true);
     expect(revalidated.findings).toEqual([]);
-  }, 45000); // 3 block-runner spawns happen in this test (~10s each steady-state, see README "Known issues" #4)
+  });
 
   it('fixes a file with multiple BLOCK_INVALID findings, correcting all of them', async () => {
     // Regression/gap-closing test for TESTS.md "Known gaps": --fix was
@@ -285,7 +329,7 @@ describe('validateFile — --fix', () => {
     const revalidated = await validateFile(tmpFile);
     expect(revalidated.ok).toBe(true);
     expect(revalidated.findings).toEqual([]);
-  }, 45000); // 3 block-runner spawns happen in this test (~10s each steady-state, see README "Known issues" #4)
+  });
 
   it('skips fixing files with blocking structural errors', async () => {
     const tmpFile = path.join(os.tmpdir(), `wp-block-guard-fix-skip-${Date.now()}.html`);
@@ -337,7 +381,7 @@ describe('validateFile — --fix line-ending fidelity (wpbg-8j7)', () => {
     expect(written).toMatch(/\r\n/);
     expect(written.match(/(?<!\r)\n/g)).toBeNull();
     expect(written).toMatch(/\r\n$/);
-  }, 45000);
+  });
 
   it('preserves CRLF without a trailing newline', async () => {
     const tmpFile = await writeWithEol('crlf-nonl', '\r\n', { trailingNewline: false });
@@ -348,7 +392,7 @@ describe('validateFile — --fix line-ending fidelity (wpbg-8j7)', () => {
     expect(written).toMatch(/\r\n/);
     expect(written.match(/(?<!\r)\n/g)).toBeNull();
     expect(written).not.toMatch(/\r?\n$/);
-  }, 45000);
+  });
 
   it('preserves LF with a trailing newline', async () => {
     const tmpFile = await writeWithEol('lf-nl', '\n', { trailingNewline: true });
@@ -358,7 +402,7 @@ describe('validateFile — --fix line-ending fidelity (wpbg-8j7)', () => {
     const written = await fs.readFile(tmpFile, 'utf8');
     expect(written).not.toMatch(/\r/);
     expect(written).toMatch(/\n$/);
-  }, 45000);
+  });
 
   it('preserves LF without a trailing newline', async () => {
     const tmpFile = await writeWithEol('lf-nonl', '\n', { trailingNewline: false });
@@ -368,7 +412,7 @@ describe('validateFile — --fix line-ending fidelity (wpbg-8j7)', () => {
     const written = await fs.readFile(tmpFile, 'utf8');
     expect(written).not.toMatch(/\r/);
     expect(written).not.toMatch(/\n$/);
-  }, 45000);
+  });
 
   // The one shape where conforming and not conforming would actually diverge:
   // a --fix run that leaves a residual finding standing (block-runner cannot
@@ -411,7 +455,7 @@ describe('validateFile — --fix line-ending fidelity (wpbg-8j7)', () => {
       expect(finding.search).toMatch(/\r\n/);
       expect(written).toContain(finding.search);
     }
-  }, 45000);
+  });
 });
 
 describe('block-runner stderr containment', () => {
@@ -432,6 +476,13 @@ describe('block-runner stderr containment', () => {
   // The fixture must be a block canonicalize CANNOT repair: a repairable
   // near-miss produces no dump, so the test would pass whether or not the
   // capture works. Measured on this fixture: 14393 bytes without it, 0 with.
+  //
+  // The only case in this file that needs a raised budget other than the first
+  // one: spawning the CLI means a second OS process, which pays the ~7-11s
+  // block-runner boot over again rather than reusing the one this worker has
+  // already paid for — the warm-up hook at the top of this file cannot reach
+  // into a child process. It is therefore the one case here that still needs a
+  // raised budget. See tests/README.md for the measurements behind the number.
   it('does not leak block-runner output to stderr on a --fix run', async () => {
     const tmpFile = path.join(os.tmpdir(), `wp-block-guard-stderr-${Date.now()}.html`);
     tmpFiles.push(tmpFile);
@@ -448,7 +499,7 @@ describe('block-runner stderr containment', () => {
     });
 
     expect(stderr).toBe('');
-  }, 45000);
+  }, SUBPROCESS_BOOT_BUDGET_MS);
 });
 
 describe('validateFile — BLOCK_INVALID positions (wpbg-djb)', () => {
@@ -520,7 +571,7 @@ describe('validateFile — positions after --fix', () => {
       expect(lines[finding.line - 1].trim().startsWith('<!--')).toBe(false);
       expect(lines[finding.line - 1]).toContain('aria-hidden');
     }
-  }, 45000);
+  });
 });
 
 describe('validateFile — search (wpbg-qlm)', () => {
@@ -623,7 +674,7 @@ describe('validateFile — search (wpbg-qlm)', () => {
     // --fix reflows the whole document, so text sliced out of the pre-fix
     // content would not be found in what is now on disk.
     expectFindableIn(await fs.readFile(tmpFile, 'utf8'), result.findings);
-  }, 45000);
+  });
 });
 
 describe('validateFile — --suggest', () => {
@@ -687,7 +738,7 @@ describe('validateFile — --suggest', () => {
     expect(suggested.ok).toBe(plain.ok);
     expect(suggested.ok).toBe(false);
     expect(suggested.summary).toEqual(plain.summary);
-  }, 45000);
+  });
 
   it('yields no suggestion for a clean file, rather than a copy of the input', async () => {
     const result = await validateFile(fx('valid-heading.html'), { suggest: true });
@@ -735,7 +786,7 @@ describe('validateFile — --suggest', () => {
     // Same gate, same words: the skip reasons are a shared contract, not
     // per-flag prose.
     expect(suggested.fixSkippedReason).toBe(fixed.fixSkippedReason);
-  }, 45000);
+  });
 
   it('skips suggesting for embedded PHP, reusing the --fix reason text', async () => {
     const tmpFile = await copyToTmp('pattern-with-interpolation.php', 'php');
@@ -746,7 +797,7 @@ describe('validateFile — --suggest', () => {
     expect(suggested.suggestedOutput).toBeNull();
     expect(suggested.fixSkippedReason).toMatch(/embedded PHP/i);
     expect(suggested.fixSkippedReason).toBe(fixed.fixSkippedReason);
-  }, 45000);
+  });
 
   it('preserves a CRLF input’s line endings in the suggestion', async () => {
     const tmpFile = await writeWithEol('crlf', '\r\n', { trailingNewline: true });
@@ -848,7 +899,7 @@ describe('validateFile — --suggest match (wpbg-lsf)', () => {
     const revalidated = await validateFile(repairedFile);
     expect(revalidated.ok).toBe(true);
     expect(revalidated.findings).toEqual([]);
-  }, 45000);
+  });
 
   it('is null for a block with children, even though the parent is invalid', async () => {
     const result = await validateFile(fx('invalid-parent-valid-child.html'), { suggest: true });
@@ -856,14 +907,14 @@ describe('validateFile — --suggest match (wpbg-lsf)', () => {
     expect(finding).toBeDefined();
     expect(finding.blockName).toBe('core/group');
     expect(finding.match).toBeNull();
-  }, 45000);
+  });
 
   it('is null when the correction does not resolve the finding', async () => {
     const result = await validateFile(fx('unfixable-extra-attribute.html'), { suggest: true });
     const finding = result.findings.find((f) => f.code === 'BLOCK_INVALID');
     expect(finding).toBeDefined();
     expect(finding.match).toBeNull();
-  }, 45000);
+  });
 
   it('is null for a leaf BLOCK_INVALID even when embedded PHP elsewhere blocks --suggest', async () => {
     // pattern-with-interpolation.php (used by the --suggest describe block
@@ -902,7 +953,7 @@ describe('validateFile — --suggest match (wpbg-lsf)', () => {
     // untouched PHP tag elsewhere in the body) to canonicalize — the one
     // thing this feature exists to never do unverified.
     expect(invalid.match).toBeNull();
-  }, 45000);
+  });
 
   it('matches the CRLF input file’s line-ending convention', async () => {
     const tmpFile = await writeWithEol('crlf', '\r\n');
@@ -915,7 +966,7 @@ describe('validateFile — --suggest match (wpbg-lsf)', () => {
     // No spurious trailing newline: match is a spliceable inner span, not a
     // whole line.
     expect(finding.match).not.toMatch(/\r?\n$/);
-  }, 45000);
+  });
 
   it('matches the LF input file’s line-ending convention', async () => {
     const tmpFile = await writeWithEol('lf', '\n');
@@ -925,7 +976,7 @@ describe('validateFile — --suggest match (wpbg-lsf)', () => {
     expect(finding.match).not.toBeNull();
     expect(finding.match).not.toMatch(/\r/);
     expect(finding.match).not.toMatch(/\r?\n$/);
-  }, 45000);
+  });
 });
 
 describe('conformToSource', () => {

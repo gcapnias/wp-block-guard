@@ -19,7 +19,22 @@ function run(args) {
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
-describe('CLI wiring', () => {
+// Every `run()` above is a fresh OS process, so any invocation that reaches
+// block-runner pays its full jsdom + @wordpress/* boot again. That is
+// structural, not a budgeting accident: the boot is paid once per *process*
+// (docs/adr/0004-in-process-block-runner-invocation.md) and exercising the
+// real binary is this file's entire purpose. pipeline.test.js solves its
+// equivalent problem with a warm-up hook; that is not available here, because
+// the boot happens in the child, not in this process.
+//
+// These are budgets, not costs. Measurements behind them are in
+// tests/README.md, which is the single place they are recorded. The budgets
+// are attached to the describe blocks that spawn, leaving the pure-unit blocks
+// (`normalizePatternsForPlatform`, `shouldColorize`) on the 5s default.
+const ONE_BOOT_BUDGET_MS = 45000; // ~3.5x the worst single-boot case (13.0s)
+const TWO_BOOT_BUDGET_MS = 90000; // ~3.9x the worst two-boot case (23.1s)
+
+describe('CLI wiring', { timeout: ONE_BOOT_BUDGET_MS }, () => {
   it('exits 0 and emits a clean JSON report for a valid file', () => {
     const { status, stdout } = run([fx('valid-heading.html'), '--json']);
     expect(status).toBe(0);
@@ -38,6 +53,8 @@ describe('CLI wiring', () => {
     expect(report.files[0].findings[0]).toMatchObject({ code: 'BLOCK_INVALID', blockName: 'core/heading' });
   });
 
+  // The only case in the suite that makes two block-runner-backed CLI
+  // invocations back to back, so it is the only one needing double the budget.
   it('--strict turns a warning-only file into a failing exit code', () => {
     const plain = run([fx('no-blocks.html'), '--json']);
     expect(plain.status).toBe(0);
@@ -47,7 +64,7 @@ describe('CLI wiring', () => {
     const report = JSON.parse(strict.stdout);
     expect(report.ok).toBe(true); // still no errors
     expect(report.summary.warnings).toBe(1);
-  }, 30000); // 2 block-runner-backed CLI invocations (~10s each steady-state, see README "Known issues" #4)
+  }, TWO_BOOT_BUDGET_MS);
 
   it('--strict human output does not print PASS for a file whose warnings caused exit 1', () => {
     // Regression test for README "Known issues" #3: formatHuman used to check
@@ -140,7 +157,7 @@ describe('normalizePatternsForPlatform', () => {
   });
 });
 
-describe('CLI --suggest', () => {
+describe('CLI --suggest', { timeout: ONE_BOOT_BUDGET_MS }, () => {
   const tmpFiles = [];
   const tmpDirs = [];
 
@@ -208,7 +225,7 @@ describe('CLI --suggest', () => {
     expect(file.fixApplied).toBe(false);
     expect(file.suggestedOutput).toContain('wp-block-heading');
     expect(file.findings[0].code).toBe('BLOCK_INVALID');
-  }, 45000);
+  });
 
   it('reports suggestedOutput as null for a clean file', () => {
     const { status, stdout } = run([fx('valid-heading.html'), '--suggest', '--json']);
@@ -242,7 +259,7 @@ describe('CLI --suggest', () => {
     expect(byName['one.html'].suggestedOutput.match(/wp-block-heading/g)).toHaveLength(1);
     expect(byName['two.html'].suggestedOutput.match(/wp-block-heading/g)).toHaveLength(2);
     expect(byName['clean.html'].suggestedOutput).toBeNull();
-  }, 45000);
+  });
 });
 
 const ANSI_RE = /\x1b\[\d+m/;
@@ -265,7 +282,7 @@ describe('shouldColorize', () => {
   });
 });
 
-describe('CLI human output color suppression', () => {
+describe('CLI human output color suppression', { timeout: ONE_BOOT_BUDGET_MS }, () => {
   // spawnSync pipes stdout, so process.stdout.isTTY is always false in the
   // child here — these end-to-end runs exercise the non-TTY suppression
   // path for real; the TTY-enabled path is covered by the formatHuman and
