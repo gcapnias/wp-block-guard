@@ -49,24 +49,93 @@ Two consequences, and the suite handles them differently:
 - **`cli.test.js`** spawns the real binary per case, so each spawn pays a fresh boot in
   the child. A warm-up cannot help; those describe blocks carry raised budgets instead.
 
-### Measured costs (2026-09-16, 12-core machine)
+### Measured costs
 
-This table is the single source for the numbers cited in `vitest.config.js`,
-`tests/pipeline.test.js`, and `tests/cli.test.js`. Update it here, not there.
+Two campaigns, kept distinct because they measured different things. This section is
+the single source for the numbers cited in `vitest.config.js`, `tests/pipeline.test.js`,
+and `tests/cli.test.js`. Update it here, not there.
+
+#### Boot and import, measured directly (2026-09-17, wpbg-3z1)
+
+Twenty full-suite runs from the main checkout (two campaigns of ten), 3540 records,
+instrumented at the seam in `src/block-runner-adapter.js` via `src/timing.js`. Reproduce
+with `npm run measure:boot` then `npm run analyse:boot -- .scratch/boot-measure/timings.jsonl`.
+
+| What | n | min | p50 | p90 | max |
+|---|---|---|---|---|---|
+| First `validate()` in-process (the boot) | 20 | 6.68s | 7.7s | 9.6s | 9.91s |
+| First `validate()` in a CLI child (the boot) | 240 | 6.61s | 7.6s | 10.0s | **87.63s** |
+| `block-runner` import, pipeline worker | 20 | 0.88s | 0.98s | 1.18s | 1.20s |
+| `block-runner` import, in a CLI child | 420 | 0.80s | 0.89s | 1.10s | 2.68s |
+| `block-runner` import, cli.test.js worker | 20 | 0.89s | 1.02s | 1.21s | **25.52s** |
+| Every `validate()` after the boot | 2820 | 0ms | 0ms | 10ms | 140ms |
+| Full suite, serial (wall clock) | 20 | 116.6s | ~136s | — | 246s |
+
+**Three kinds of process appear here and must not be conflated.** The `cli.test.js`
+worker imports `src/cli.js` for its unit tests, pulling in block-runner — so it pays an
+import during vitest's **file-import phase, which no test timeout governs**. It is not a
+spawned CLI child, and reading it as one is what made an early draft of this table wrong.
+`scripts/analyse-boot-timings.mjs` separates them, and asserts the shape of every run
+(12 child boots, 9 non-booting children, 1 worker import) rather than trusting the
+classification.
+
+Note also that a pid does not identify a process: Windows recycled a pid *within* a run
+three times across these 20 runs, merging two children in the log. The analysis splits on
+the import record, which every process emits exactly once.
+
+**The second campaign caught a stall intact — the first time that has happened.** One
+child paid **87.63s** on an otherwise-green run (246s wall clock against a 132s median),
+while in the same run the `cli.test.js` worker paid a 25.52s import. Every previous stall
+was censored at ">45s" by the budget that killed the run; this one was measurable only
+because the budgets had been raised first. The first campaign's ten runs, by contrast,
+produced no stall at all — the widest boot was 17.78s.
+
+#### Whole-invocation costs (2026-09-16, 12-core machine)
+
+Not re-measured by the 2026-09-17 campaign, which timed the boot and import specifically
+rather than whole invocations. Retained as the older measurement they are.
 
 | What | Cost |
 |---|---|
-| `import('block-runner')` | 1.1–1.3s |
-| First `validate()` in a process (the boot) | 8.0–13.9s |
-| Every in-process `validate()` after it | 2–160ms |
 | One block-runner-backed CLI invocation | 8.3–13.0s |
 | Two such invocations in one case (`--strict`) | 16.0–23.1s |
 | CLI invocation that never reaches block-runner | 1.1–2.5s |
-| Full suite, serial | ~119–155s |
 
-Note this re-measures ADR 0004's "11–36ms" figure for post-boot in-process calls; the
-spread is wider (2–160ms) on the fixtures this suite uses, but the conclusion the ADR
-draws from it is unchanged.
+Note the post-boot in-process figure re-measures ADR 0004's "11–36ms"; the spread is
+wider on the fixtures this suite uses, but the conclusion the ADR draws from it is
+unchanged.
+
+### The I/O-stall hypothesis
+
+The standing explanation for the stalls that produced these budgets is an **I/O** stall
+loading the 350-package `@wordpress/*` + jsdom tree, not CPU contention. The evidence is
+circumstantial and is recorded here so it is not re-derived from scratch:
+
+- During one wpbg-f06 stall, the eight CLI cases that spawn a process without booting
+  block-runner stayed at 1.10–2.32s — entirely normal — while the boot specifically
+  stalled. Process creation was not what slowed down.
+- The one red main-checkout run on record showed vitest's file `import` at 17.98s against
+  2.44–2.63s on its four green neighbours.
+- The 2026-09-17 confirmation campaign caught one stalled run directly: a **25.52s**
+  worker import and an **87.63s** child boot in the same run, against ~1.0s and ~9s on
+  the other nineteen. Two different processes, minutes apart, both stalled on
+  block-runner I/O within one window.
+- The stall was **not uniform**: the very child that took 87.63s to boot had a completely
+  normal 1.36s import. Whatever slowed down did not slow everything down equally.
+- This machine runs OneDrive sync and a PC-manager service over the workspace.
+
+**What this settles about the earlier red run.** An import-phase stall cannot fail a
+test — no budget governs that phase. So the unnamed failure in wpbg-f06's post-merge run
+cannot have been its 17.98s import; it must have been a boot that stalled in the same
+window and blew its 45s budget. The 2026-09-17 stall has exactly that shape, with the
+boot surviving only because the budget had been raised. That closes a gap wpbg-f06 left
+open when the failing case name went uncaptured.
+
+This remains a **hypothesis consistent with the data, not a confirmed cause.** Timing
+deltas measure duration, not cause; they cannot distinguish an I/O stall from CPU
+contention. Establishing cause would need a different instrument (disk-queue counters, or
+a control run with those services paused). Note also that one stall occurred in 20 runs,
+which bounds how much can be claimed about frequency.
 
 ### Where raised budgets live, and why
 
@@ -75,35 +144,75 @@ purpose. A timeout here can only ever catch block-runner *hanging*; it cannot
 make the boot faster, so a tight number buys a false red rather than a faster
 signal.
 
-| Location | Budget | Covers |
-|---|---|---|
-| `pipeline.test.js` `beforeAll` | 120s | the one in-process boot |
-| `pipeline.test.js` stderr-containment case | 45s | a boot inside a spawned child |
-| `cli.test.js` nine block-runner-backed cases | 45s | one boot per case |
-| `cli.test.js` `--strict` case | 90s | two boots back to back |
-| `cli.test.js` backslash-pattern case | 15s | two node start-ups, no boot |
+| Location | Budget | Headroom over worst measured | Covers |
+|---|---|---|---|
+| `pipeline.test.js` `beforeAll` | 240s | ~24x (9.91s in-process) | the one in-process boot |
+| `pipeline.test.js` stderr-containment case | 240s | ~2.7x (87.63s) | a boot inside a spawned child |
+| `cli.test.js` nine block-runner-backed cases | 240s | ~2.7x (87.63s) | one boot per case |
+| `cli.test.js` `--strict` case | 480s | ~2.7x | two boots back to back |
+| `cli.test.js` backslash-pattern case | 15s | ~6x (2.39s, 2026-09-16) | two node start-ups, no boot |
+
+**Why the three boot budgets are all 240s.** They cover the same cost — one
+block-runner boot — so they carry the same number. They did not always: until wpbg-3z1
+the in-process hook was on 120s while the child boots were on 45s, a 2.7x split that no
+single set of measurements could justify. It was resolved upward rather than downward,
+because the one hard empirical result available was that **45s had been observed
+insufficient** for both a hook boot and a child boot on this machine.
+
+**Why 240s and not 120s.** 120s was the first answer, set when the widest boot on record
+was 17.78s. The confirmation campaign then caught an 87.63s boot — which would have left
+that budget only ~1.35x headroom, thinner than the 2.1x this file elsewhere calls the
+shape of budget that produces false reds. The number was raised to keep ~2.7x over the
+worst boot ever actually observed rather than over the worst one convenient to assume.
+
+**Why the headroom is large at all.** Not because the measured spread demands it — 240s
+is ~31x the 7.6s median. Three reasons, in order of weight:
+
+1. **The cost asymmetry is lopsided.** A false red is expensive and has been paid
+   repeatedly: wpbg-f06 traced four suites to it, each needing investigation before a
+   merge could proceed. A hang caught at 240s rather than 120s costs two extra minutes,
+   once, on a failure that is catastrophic and obvious at either number.
+2. A timeout here can only ever catch block-runner **hanging**. It cannot make the boot
+   faster, so a tight number buys a false red, not a faster signal.
+3. For the hook specifically: a *hook* failure fails all ~60 tests in the file rather
+   than one. That amplification argument stands on its own, independent of any
+   measurement — which matters here, because the in-process boot has only one sample per
+   run and has never been observed above 9.91s. That constant rests on this argument,
+   not on its own distribution.
+
+Note that the measured range remains the distribution's **body**. Even 87.63s is one
+sample; the three earlier stalls are known only as ">45s" because a budget truncated
+them, so no headroom factor can be derived from those at all.
+
+Note that a timed-out hook does not appear to cancel the boot already in flight, so such
+a run also pays a long teardown. Do not read that inflated wall clock as evidence of a
+longer boot.
 
 The `cli.test.js` budgets are per case, not per describe: three of its describe blocks
 mix cases that boot with cases that never reach block-runner. Only
 `CLI human output color suppression`, where all three cases boot, carries a
-describe-level budget.
-
-The warm-up hook's 120s looks wildly out of proportion to a 14s worst-case boot,
-and is deliberate. A 45s budget there **did** time out on one run whose wall
-clock was 226s against ~122s for its neighbours. Two things make the hook a
-special case: the boot's tail is fat and entirely at the mercy of machine load,
-and a *hook* failure fails all 60 tests in the file rather than one. Note that a
-timed-out hook does not appear to cancel the boot already in flight, so such a
-run also pays a long teardown.
+describe-level budget. That boot/no-boot split is confirmed by measurement, not assumed:
+the instrumentation counts 22 CLI children per run recording a block-runner import, but
+only 12 recording a boot.
 
 A per-case timeout argument (`it(name, fn, ms)`) overrides a describe-level
 `{ timeout }` option — verified against vitest 4.1.11, which is what puts
-`--strict` on 90s rather than its describe's 45s.
+`--strict` on 480s rather than its describe's 240s.
 
 Everything else runs on the 5s default, including all 72 cases in
 `structural.test.js`, `php-fragment.test.js`, `report.test.js`, and
-`block-locator.test.js`; the other 59 cases in `pipeline.test.js`; and the eight
-`cli.test.js` cases that spawn the CLI without ever reaching block-runner.
+`block-locator.test.js`; the other 59 cases in `pipeline.test.js`; the four cases in
+`timing.test.js`; and the eight `cli.test.js` cases that spawn the CLI without ever
+reaching block-runner.
+
+**Known thin margin, not fixed here.** Those no-boot CLI cases skip the boot but still pay
+block-runner's module *import* in the child, measured 0.80–2.68s over 420 samples. Against
+the 5s default that is roughly 1.35x headroom — thinner than the 2.1x that wpbg-f06
+identified as the shape of budget that produces false reds. Note the honest limit on the
+evidence: no *child* import has been observed stalling (2.68s is the worst in 420), and the
+25.52s stall was in the `cli.test.js` worker, which no budget governs. wpbg-3z1 measured
+this but deliberately did not act on it, since those cases were outside its scope; tracked
+as wpbg-6nl.
 
 ## Structure
 
@@ -113,6 +222,7 @@ tests/
 ├── php-fragment.test.js  unit tests — Layer 0 (src/php-fragment.js)
 ├── pipeline.test.js      integration tests — validateFile() (src/pipeline.js)
 ├── cli.test.js           end-to-end tests — bin/wp-block-guard.js
+├── timing.test.js        unit tests — the boot instrumentation (src/timing.js)
 └── fixtures/
     ├── wp-block-guard/   fixtures for this suite (see below)
     ├── mastermind-ls/    unrelated fixtures for a different tool
@@ -166,6 +276,16 @@ Spawns `bin/wp-block-guard.js` via `child_process.spawnSync` end-to-end: clean e
 no-args usage error (exit 2, help to stderr), no-glob-match usage error (exit 2),
 `--version`, and multi-file JSON output ordering (alphabetical by full resolved path,
 independent of argument order).
+
+### `timing.test.js`
+
+Unit tests for `src/timing.js`, the instrumentation the boot budgets are derived from
+(`npm run measure:boot`). The property asserted first is the one that matters most: with
+`WPBG_TIMING_LOG` unset — every ordinary run, including every user's — `recordTiming()`
+does nothing and touches no disk. The rest cover the JSONL record shape, the `pid`/`run`
+tagging that separates this process's boot from a spawned child's, and that an unwritable
+log path cannot throw. Instrumentation must not be able to fail a run it is only
+observing.
 
 ## Fixtures (`tests/fixtures/wp-block-guard/`)
 

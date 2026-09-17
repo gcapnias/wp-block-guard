@@ -11,8 +11,10 @@ export default defineConfig({
     testTimeout: 5000,
 
     // Run test files one at a time. block-runner boots jsdom + the
-    // @wordpress/* tree at its first validate() call, costing ~8-14s per OS
-    // process (docs/adr/0004-in-process-block-runner-invocation.md). Under
+    // @wordpress/* tree at its first validate() call, costing 6.6-17.8s per OS
+    // process (wpbg-3z1, 130 boots over 10 runs; p50 7.4s — full distribution
+    // in tests/README.md, re-measurable with `npm run measure:boot`)
+    // (docs/adr/0004-in-process-block-runner-invocation.md). Under
     // file parallelism every worker that pays that boot starts inside the same
     // opening window and they starve each other, so the same test took 8s on
     // one run and blew its budget on the next — four false-red suites were
@@ -24,6 +26,11 @@ export default defineConfig({
     // *faster* serially (2.7s) than in parallel (4.3s), because worker startup
     // dwarfs their ~15ms of actual test time. No throughput is being traded
     // away, only variance removed.
+    //
+    // Serial wall clock has since been re-measured over ten runs as
+    // 116.6-173.1s (wpbg-3z1) — a wider spread than the single 127.3s above.
+    // The parallel-vs-serial comparison itself was not re-run, so the
+    // 2026-09-16 figures remain the basis for this setting.
     //
     // This also keeps the suite on the safe side of ADR 0004: the adapter's
     // captureStderr() patches a global and is only sound while exactly one

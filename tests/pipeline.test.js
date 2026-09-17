@@ -11,23 +11,42 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(__dirname, 'fixtures', 'wp-block-guard');
 const fx = (name) => path.join(FIXTURES, name);
 
-// Budgets, not costs. One block-runner boot measured 8.0-13.9s across every
-// condition exercised here (see tests/README.md).
+// Budgets, not costs. Both numbers below are 240s, and that equality is the
+// point: they cover the same block-runner boot, so wpbg-3z1 raised the child
+// budget to the hook's rather than lowering the hook to the child's. The old
+// 120s-vs-45s split claimed one boot was worth 2.7x the other.
 //
-// BOOT_BUDGET_MS is deliberately far larger than that 3x-ish headroom would
-// suggest, for two reasons learned the hard way:
-//   1. The boot's duration is entirely at the mercy of machine load, and its
-//      tail is fat. A 45s budget here timed out on a run where the machine
-//      stalled — the same run took 226s wall against ~122s for its nine
-//      neighbours. The suite cannot control that, and failing is not a useful
-//      response to it.
-//   2. A *hook* failure fails every test in the file (60 of them), not one.
-//      That amplification means this budget must be conservative in a way a
-//      per-test budget need not be.
-// Its job is to catch block-runner genuinely hanging, not to police a start-up
-// cost that is known, fixed, and out of scope to fix (README "Known issues").
-const BOOT_BUDGET_MS = 120000; // in-process boot, paid by the warm-up hook
-const SUBPROCESS_BOOT_BUDGET_MS = 45000; // boot inside a spawned CLI child
+// Measured directly over 20 full-suite runs (wpbg-3z1, 2026-09-17, 12-core
+// Windows machine; instrument is src/timing.js, tables in tests/README.md):
+//   in-process boot  n=20   6.7-9.9s   (p50 7.7s)
+//   child boot       n=240  6.6-87.6s  (p50 7.6s, p90 10.0s)
+//
+// The 87.6s is the number that sets these budgets, and it is worth knowing
+// how it was obtained. Every stall on record before wpbg-3z1 was *censored*:
+// a 45s budget killed the run, so all anyone could say was ">45s". Raising
+// the budgets first, then measuring, caught one intact — a single child that
+// paid 87.6s on an otherwise-green run whose wall clock was 246s against a
+// 132s median. So 240s is ~2.7x the worst boot ever actually observed, rather
+// than a multiple of a number that a timeout had truncated.
+//
+// Why the headroom is large, in order of weight:
+//   1. The cost asymmetry is lopsided. A false red is expensive and has been
+//      paid repeatedly — four suites traced to it in wpbg-f06, each needing
+//      investigation before a merge could proceed. A hang caught at 240s
+//      rather than 120s costs two extra minutes, once, on a failure that is
+//      catastrophic and obvious either way.
+//   2. A timeout here cannot make a known start-up cost faster. Its only
+//      useful job is catching block-runner genuinely *hanging*, and a 240s
+//      budget catches a hang just as surely as a 45s one. A tight number buys
+//      a false red, not a faster signal.
+//   3. For the hook specifically: a *hook* failure fails every test in the
+//      file (~60 of them), not one. That amplification means this budget must
+//      be conservative in a way a per-test budget need not be — an argument
+//      that stands on its own, independent of any measurement. It carries
+//      most of the weight for BOOT_BUDGET_MS, whose n=20 in-process samples
+//      never exceeded 9.9s and so cannot justify 240s on their own.
+const BOOT_BUDGET_MS = 240000; // in-process boot, paid by the warm-up hook
+const SUBPROCESS_BOOT_BUDGET_MS = 240000; // boot inside a spawned CLI child
 
 // Pay block-runner's boot here, in a hook, so that no individual test's budget
 // absorbs it. block-runner loads jsdom + the @wordpress/* tree lazily, at its

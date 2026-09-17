@@ -34,14 +34,39 @@ function run(args) {
 // "reaches block-runner" are different things. Eight cases here spawn a real
 // process but never boot block-runner — the usage-error and --version cases
 // never get that far, and the multi-file and backslash-pattern cases use
-// fixtures with blocking structural errors, so Layer 2 is skipped. Measured
-// 1.06-1.23s, i.e. node start-up only. Those sit on the 5s default; only the
-// cases that actually pay a boot carry a raised budget.
-const ONE_BOOT_BUDGET_MS = 45000; // ~3.5x the worst single-boot case (13.0s)
-const TWO_BOOT_BUDGET_MS = 90000; // ~3.9x the worst two-boot case (23.1s)
-// Two node start-ups back to back, no block-runner: measured 2.14-2.39s. On the
-// 5s default this would be the tightest margin in the suite (2.1x), which is
-// the shape of thin budget that caused this bead in the first place.
+// fixtures with blocking structural errors, so Layer 2 is skipped. Those sit
+// on the 5s default; only the cases that actually pay a boot carry a raised
+// budget.
+//
+// That split is not an assumption: wpbg-3z1's instrumentation counts 21 CLI
+// children per suite run (20 spawned here, one by pipeline.test.js), of which
+// 12 record a block-runner boot and 9 record only its import, confirming the
+// non-booting spawns directly.
+//
+// Do not confuse those 9 with the *vitest worker* for this file, which also
+// imports block-runner — this file imports src/cli.js for the
+// normalizePatternsForPlatform and shouldColorize cases, which pulls the
+// adapter in with it. That import happens during vitest's file-import phase,
+// governed by no test timeout at all, and a 25.5s stall has been observed
+// there. It is a different process and a different problem (wpbg-6nl).
+//
+// A child boot measured 6.6-87.6s over 240 samples (p50 7.6s, p90 10.0s;
+// wpbg-3z1, 2026-09-17 — see tests/README.md). ONE_BOOT_BUDGET_MS is ~2.7x
+// that worst case, and deliberately equal to pipeline.test.js's in-process
+// BOOT_BUDGET_MS: it is the same boot, so it gets the same budget. The 45s
+// this replaced was observed insufficient on a real run, and the reasoning
+// behind the size is documented at BOOT_BUDGET_MS rather than repeated here.
+const ONE_BOOT_BUDGET_MS = 240000; // ~2.7x the worst measured single child boot (87.6s)
+const TWO_BOOT_BUDGET_MS = 480000; // two such boots back to back, same headroom
+// Two node start-ups back to back, no block-runner: measured 2.14-2.39s
+// (2026-09-16, whole-invocation). Left at 15s, i.e. ~6x, because wpbg-3z1
+// measured only the boot and import, not whole-invocation time.
+//
+// Known thin margin, deliberately not widened here: these spawns skip the boot
+// but still pay block-runner's module *import*, measured 0.80-2.68s in a child
+// over 420 samples. Against the 5s default that leaves the no-boot cases
+// roughly 1.35x, thinner than the 2.1x this bead's predecessor called the shape
+// that causes false reds. Tracked as wpbg-6nl rather than fixed here.
 const TWO_SPAWNS_NO_BOOT_BUDGET_MS = 15000;
 
 describe('CLI wiring', () => {

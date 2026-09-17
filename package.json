@@ -25,7 +25,9 @@
   "scripts": {
     "start": "node bin/wp-block-guard.js",
     "test": "vitest run",
-    "compile": "bun build --compile ./bin/wp-block-guard.js --outfile bin/wp-block-guard.exe"
+    "compile": "bun build --compile ./bin/wp-block-guard.js --outfile bin/wp-block-guard.exe",
+    "measure:boot": "bash scripts/measure-boot.sh",
+    "analyse:boot": "node scripts/analyse-boot-timings.mjs"
   },
   "dependencies": {
     "block-runner": "^0.8.0",

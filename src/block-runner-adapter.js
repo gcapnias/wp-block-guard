@@ -24,7 +24,50 @@
 // report's `output` field (confirmed empirically — see the "canonicalize
 // output field" note below).
 
+// Import order below is load-bearing, not stylistic. ESM evaluates imports in
+// declaration order, so `./timing.js` finishes evaluating — recording its own
+// load timestamp as it does — immediately before `block-runner` starts. The
+// only work between the two marks is block-runner's own module evaluation,
+// which is the cost being measured. Reordering these, or importing
+// `./timing.js` from anywhere else in the graph, moves the anchor earlier and
+// silently inflates the figure.
+//
+// That import is measured separately from the boot because the two stall
+// independently: the one main-checkout red run on record showed a 17.98s
+// import against 2.4-2.6s on its green neighbours, with the boot itself
+// normal (wpbg-3z1). A single combined number would have hidden it.
+import { recordTiming, TIMING_MODULE_LOADED_AT } from './timing.js';
 import { validate, canonicalize } from 'block-runner';
+
+recordTiming('block-runner-import', Date.now() - TIMING_MODULE_LOADED_AT);
+
+// block-runner loads jsdom + the @wordpress/* tree lazily, at its first
+// validate()/canonicalize() call rather than at import, and the result is
+// cached for the life of the process
+// (docs/adr/0004-in-process-block-runner-invocation.md). So exactly one call
+// per process pays the boot, and that first call is the one worth timing.
+let bootRecorded = false;
+
+/**
+ * Time `fn` and, if it is the first block-runner call in this process, record
+ * it as the boot. Subsequent calls are recorded as steady-state work, which is
+ * what makes the boot's cost legible by contrast in the same log.
+ * @template T
+ * @param {() => Promise<T>} fn
+ * @returns {Promise<T>}
+ */
+async function timed(fn) {
+  if (!process.env.WPBG_TIMING_LOG) return fn();
+  const startedAt = Date.now();
+  try {
+    return await fn();
+  } finally {
+    // In the `finally` so a throwing call is still timed: a block-runner that
+    // hangs and then fails is precisely the case these budgets exist to catch.
+    recordTiming(bootRecorded ? 'steady-state-call' : 'first-validate', Date.now() - startedAt);
+    bootRecorded = true;
+  }
+}
 
 /**
  * Run `fn` with block-runner's own stderr output captured rather than left to
@@ -66,7 +109,7 @@ async function captureStderr(fn) {
  * @returns {Promise<{ ok: boolean, exitCode: number|null, data: object|null, error: string|null, stderr: string }>}
  */
 export async function validateMarkup(markup) {
-  const run = await captureStderr(() => validate(markup));
+  const run = await captureStderr(() => timed(() => validate(markup)));
   if (!run.ok) {
     // Captured output is returned on `stderr` rather than discarded: a thrown
     // validate is exactly the case where block-runner's own output is the only
@@ -93,7 +136,7 @@ export async function validateMarkup(markup) {
  * @returns {Promise<string|null>} the fixed markup, or null on failure
  */
 export async function fixMarkup(markup) {
-  const run = await captureStderr(() => canonicalize(markup));
+  const run = await captureStderr(() => timed(() => canonicalize(markup)));
   if (!run.ok) {
     // This function's contract is `string | null`, so there is no field to
     // hand the captured output back on. Write it through to the real stderr
