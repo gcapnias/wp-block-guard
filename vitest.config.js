@@ -31,9 +31,18 @@ export default defineConfig({
     fileParallelism: false,
 
     // .claude/worktrees/* are full nested checkouts (each with their own
-    // tests/*.test.js) used for isolated agent work. Vitest's defaults don't
-    // exclude them, so without this they get discovered and run alongside
-    // this checkout's own tests.
-    exclude: [...configDefaults.exclude, '.claude/worktrees/**'],
+    // tests/*.test.js) used for isolated agent work. .scratch/ and
+    // .firecrawl/ are the other two gitignored agent workspaces CLAUDE.md
+    // invites free writes to (ad-hoc operations, and firecrawl agent output,
+    // respectively). Vitest's defaults don't exclude any of the three, so
+    // without this a stray test-shaped file dropped into one — e.g. a probe
+    // an agent forgot to clean up — gets discovered and run alongside this
+    // checkout's own tests.
+    exclude: [
+      ...configDefaults.exclude,
+      '.claude/worktrees/**',
+      '.scratch/**',
+      '.firecrawl/**',
+    ],
   },
 });

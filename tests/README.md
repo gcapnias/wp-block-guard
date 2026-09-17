@@ -15,10 +15,13 @@ at the repo root, and is three settings:
   see "Timeouts and the block-runner boot" below.
 - **`fileParallelism: false`** — test files run one at a time. This is a correctness
   setting, not a speed one (`wpbg-f06`).
-- **`exclude: [...configDefaults.exclude, '.claude/worktrees/**']`** — the spread keeps
-  vitest's own default exclusions (`node_modules`, `dist`, …); dropping it would clobber
-  them. The added entry covers `.claude/worktrees/*`, which are full nested checkouts
-  with their own `tests/*.test.js` that vitest would otherwise discover and run.
+- **`exclude: [...configDefaults.exclude, '.claude/worktrees/**', '.scratch/**', '.firecrawl/**']`**
+  — the spread keeps vitest's own default exclusions (`node_modules`, `dist`, …);
+  dropping it would clobber them. The three added entries cover the gitignored agent
+  workspaces `CLAUDE.md` invites free writes to: `.claude/worktrees/*` are full nested
+  checkouts with their own `tests/*.test.js`; `.scratch/` is ad-hoc agent working state;
+  `.firecrawl/` is firecrawl agent output. Without all three, a stray test-shaped file
+  left in any of them would be discovered and run alongside this checkout's own tests.
 
 To run a single file or filter by name:
 
