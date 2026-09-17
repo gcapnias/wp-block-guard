@@ -58,8 +58,20 @@ and `tests/cli.test.js`. Update it here, not there.
 #### Boot and import, measured directly (2026-09-17, wpbg-3z1)
 
 Twenty full-suite runs from the main checkout (two campaigns of ten), 3540 records,
-instrumented at the seam in `src/block-runner-adapter.js` via `src/timing.js`. Reproduce
-with `npm run measure:boot` then `npm run analyse:boot -- .scratch/boot-measure/timings.jsonl`.
+instrumented at the seam in `src/block-runner-adapter.js` via `src/timing.js`.
+
+A third campaign of ten runs then confirmed the final constants at HEAD with
+instrumentation **off** — the configuration a user or CI actually gets — 10/10 green,
+wall clocks 126–186s.
+
+The raw records and per-run wall clocks for all three campaigns are committed under
+`handoff/wpbg-3z1-timings/`, so every figure below can be re-derived without re-running
+anything:
+
+```sh
+npm run analyse:boot -- handoff/wpbg-3z1-timings/campaign-2-confirm.jsonl
+npm run measure:boot            # to collect a fresh campaign into .scratch/boot-measure
+```
 
 | What | n | min | p50 | p90 | max |
 |---|---|---|---|---|---|
@@ -118,18 +130,19 @@ circumstantial and is recorded here so it is not re-derived from scratch:
   2.44–2.63s on its four green neighbours.
 - The 2026-09-17 confirmation campaign caught one stalled run directly: a **25.52s**
   worker import and an **87.63s** child boot in the same run, against ~1.0s and ~9s on
-  the other nineteen. Two different processes, minutes apart, both stalled on
-  block-runner I/O within one window.
+  the other nineteen. Two different processes, minutes apart, both slow on block-runner
+  work within one window — consistent with a shared external cause, though the
+  measurement cannot identify what it was.
 - The stall was **not uniform**: the very child that took 87.63s to boot had a completely
   normal 1.36s import. Whatever slowed down did not slow everything down equally.
 - This machine runs OneDrive sync and a PC-manager service over the workspace.
 
-**What this settles about the earlier red run.** An import-phase stall cannot fail a
-test — no budget governs that phase. So the unnamed failure in wpbg-f06's post-merge run
-cannot have been its 17.98s import; it must have been a boot that stalled in the same
-window and blew its 45s budget. The 2026-09-17 stall has exactly that shape, with the
-boot surviving only because the budget had been raised. That closes a gap wpbg-f06 left
-open when the failing case name went uncaptured.
+**A likely reading of the earlier red run.** An import-phase stall cannot fail a test — no
+budget governs that phase. So the unnamed failure in wpbg-f06's post-merge run was
+probably not its 17.98s import, but a boot that stalled in the same window and blew its
+45s budget. The 2026-09-17 stall has exactly that shape, with the boot surviving only
+because the budget had been raised. This is an inference, not a finding: the failing case
+name was never captured on that run, so it cannot be confirmed.
 
 This remains a **hypothesis consistent with the data, not a confirmed cause.** Timing
 deltas measure duration, not cause; they cannot distinguish an I/O stall from CPU
@@ -192,8 +205,10 @@ The `cli.test.js` budgets are per case, not per describe: three of its describe 
 mix cases that boot with cases that never reach block-runner. Only
 `CLI human output color suppression`, where all three cases boot, carries a
 describe-level budget. That boot/no-boot split is confirmed by measurement, not assumed:
-the instrumentation counts 22 CLI children per run recording a block-runner import, but
-only 12 recording a boot.
+the instrumentation counts 21 CLI children per run (20 spawned by `cli.test.js`, one by
+`pipeline.test.js`), of which 12 record a boot and 9 record only an import. The
+`cli.test.js` vitest worker also records an import, but it is not a spawned child and is
+counted separately.
 
 A per-case timeout argument (`it(name, fn, ms)`) overrides a describe-level
 `{ timeout }` option — verified against vitest 4.1.11, which is what puts

@@ -1,0 +1,22 @@
+runs: 10   records: 1770
+
+in-process boot (pipeline worker)                n=  10 min=6.68s p50=7.40s p90=9.91s max=9.91s
+child boot (spawned CLI)                         n= 120 min=6.61s p50=7.39s p90=10.54s max=17.78s
+in-process import (pipeline worker)              n=  10 min=0.88s p50=0.96s p90=1.20s max=1.20s
+child import (spawned CLI)                       n= 210 min=0.80s p50=0.88s p90=1.17s max=2.68s
+cli-worker import (no test budget governs this)  n=  10 min=0.89s p50=1.02s p90=1.35s max=1.35s
+steady-state call                                n=1410 min=0.00s p50=0.00s p90=0.01s max=0.14s
+
+per-run worst child boot / in-process boot / cli-worker import (s):
+  run-01  child= 11.08  in-proc=  6.80  cli-worker-import=  1.09
+  run-02  child=  7.01  in-proc=  6.68  cli-worker-import=  0.91
+  run-03  child=  7.23  in-proc=  6.70  cli-worker-import=  0.91
+  run-04  child=  8.47  in-proc=  9.91  cli-worker-import=  0.89
+  run-05  child=  9.77  in-proc=  7.40  cli-worker-import=  1.05
+  run-06  child=  9.49  in-proc=  8.77  cli-worker-import=  0.95
+  run-07  child=  8.79  in-proc=  7.47  cli-worker-import=  0.99
+  run-08  child= 17.78  in-proc=  7.99  cli-worker-import=  1.35
+  run-09  child= 11.47  in-proc=  7.22  cli-worker-import=  1.02
+  run-10  child= 11.56  in-proc=  6.98  cli-worker-import=  1.21
+
+classification check passed: every run has 12 child boots, 9 non-booting children, 1 cli-worker import, and no import reading below 300ms.

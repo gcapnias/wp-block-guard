@@ -60,13 +60,18 @@ export function recordTiming(label, ms) {
  * src/block-runner-adapter.js.
  *
  * The measurement is only sound while src/block-runner-adapter.js is the sole
- * module in the *production* graph that imports this one: anything importing
- * it earlier moves this anchor and silently inflates the figure. Test files
- * may import it freely — they exercise recordTiming() directly and never reach
- * the adapter — but a new `src/` import is a real hazard.
+ * module that imports this one *before* block-runner is evaluated: anything
+ * importing it earlier moves this anchor and silently inflates the figure.
+ * A new `src/` import is the real hazard. (tests/timing.test.js also imports
+ * this module, harmlessly: it exercises recordTiming() in a process that never
+ * loads the adapter, so no anchor is being read there. Test files that *do*
+ * reach the adapter, such as pipeline.test.js and cli.test.js, import it
+ * transitively through src/, after this module — which is the ordering the
+ * measurement wants.)
  *
- * The figure is self-checking in practice: the anchor is right only if the
- * recorded import cost lands near block-runner's known ~1s module evaluation.
- * A near-zero reading means something imported this module first.
+ * scripts/analyse-boot-timings.mjs checks this rather than trusting it: a
+ * correct anchor puts the recorded import near block-runner's ~1s module
+ * evaluation, so a near-zero reading means something imported this module
+ * first, and the analysis refuses to publish numbers when it sees one.
  */
 export const TIMING_MODULE_LOADED_AT = Date.now();

@@ -41,6 +41,14 @@ const runs = [...new Set(records.map((r) => r.run))].sort();
 // be published until it is understood.
 const EXPECTED = { boots: 12, noBootChildren: 9, workerImports: 1 };
 
+// Floor for a genuine block-runner module evaluation. The import figure is
+// measured from src/timing.js's own module-eval timestamp, which is only the
+// right anchor while nothing imports it before the adapter does (see the note
+// on TIMING_MODULE_LOADED_AT). If something did, the delta collapses toward
+// zero — so a reading well under block-runner's ~0.8s floor is not a fast
+// import, it is a broken anchor, and the numbers must not be published.
+const MIN_CREDIBLE_IMPORT_MS = 300;
+
 function classify(run) {
   const rs = records.filter((r) => r.run === run);
   const byPid = new Map();
@@ -144,6 +152,20 @@ for (const run of runs) {
   if (boots !== EXPECTED.boots || noBoot !== EXPECTED.noBootChildren) {
     anomalies.push(`${run}: ${boots} child boots (expected ${EXPECTED.boots}), ${noBoot} non-booting children (expected ${EXPECTED.noBootChildren})`);
   }
+
+  const workerImports = cliWorker?.import === undefined ? 0 : 1;
+  if (workerImports !== EXPECTED.workerImports) {
+    anomalies.push(`${run}: ${workerImports} cli-worker imports (expected ${EXPECTED.workerImports})`);
+  }
+
+  const tooFast = [pipelineWorker, cliWorker, ...children]
+    .filter((p) => p?.import !== undefined && p.import < MIN_CREDIBLE_IMPORT_MS);
+  if (tooFast.length) {
+    anomalies.push(
+      `${run}: ${tooFast.length} import reading(s) below ${MIN_CREDIBLE_IMPORT_MS}ms ` +
+        `(min ${Math.min(...tooFast.map((p) => p.import))}ms) — anchor in src/timing.js is probably broken`,
+    );
+  }
 }
 
 console.log(`runs: ${runs.length}   records: ${records.length}\n`);
@@ -167,5 +189,9 @@ if (anomalies.length) {
   for (const a of anomalies) console.log(`   ${a}`);
   process.exitCode = 1;
 } else {
-  console.log(`\nclassification check passed: every run has ${EXPECTED.boots} child boots, ${EXPECTED.noBootChildren} non-booting children, 1 cli-worker import.`);
+  console.log(
+    `\nclassification check passed: every run has ${EXPECTED.boots} child boots, ` +
+      `${EXPECTED.noBootChildren} non-booting children, ${EXPECTED.workerImports} cli-worker import, ` +
+      `and no import reading below ${MIN_CREDIBLE_IMPORT_MS}ms.`,
+  );
 }

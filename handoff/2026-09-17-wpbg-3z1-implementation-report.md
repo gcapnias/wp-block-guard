@@ -121,20 +121,40 @@ duration, not cause, and cannot distinguish an I/O stall from CPU contention. On
 ## Acceptance criteria
 
 - [x] Boot duration measured directly, in-process and in a child, at the same seam
-- [x] Distribution over ≥10 runs reported (20 runs, 3540 records), raw logs preserved
+- [x] Distribution over ≥10 runs reported (20 runs, 3540 records)
+- [x] Raw per-run records and wall clocks preserved, in `handoff/wpbg-3z1-timings/`
 - [x] Every boot constant carries its measured cost and headroom factor
 - [x] The 120s-vs-45s inconsistency resolved — all boot budgets are 240s
 - [x] `tests/README.md`, `vitest.config.js` and both test files updated; no stale figure
-- [x] Ten consecutive green runs from the main checkout (campaign 2, final constants)
+- [x] Ten consecutive green runs from the main checkout, at HEAD (campaign 3)
 - [x] I/O-stall hypothesis recorded as a hypothesis
 - [x] This report, and a comment on the bead
 
-**One caveat on the ten-run criterion, stated plainly.** Campaign 2 ran at 120s/240s; the
-constants then went to 240s/480s. Those runs were not repeated, because raising a timeout
-cannot produce a failure a lower one did not — nothing in the suite asserts on elapsed
-time, so 10/10 green at 120s is a fortiori evidence for 240s. The runs also had
-instrumentation enabled, a superset of the shipped configuration. A reader who wants the
-criterion met literally at the final numbers should re-run `npm run measure:boot`.
+### Why there is a third campaign
+
+Campaign 2 was initially offered as satisfying the ten-run criterion, on the argument that
+raising a timeout cannot produce a failure a lower one did not. That argument is sound in
+itself but does not carry the criterion, for three reasons:
+
+- The `proc` field was added to `src/timing.js` *after* campaign 2, so those ten runs were
+  never runs of HEAD.
+- They ran with `WPBG_TIMING_LOG` set, which takes the measured branch of `timed()`.
+  Production takes `if (!process.env.WPBG_TIMING_LOG) return fn();` — a different path, not
+  a superset of it.
+- This bead's own brief says that on re-deriving a budget you *"state the revision, and
+  restart the ten-run count from zero."* The budgets were re-derived from 120s to 240s
+  after campaign 2. The count had to restart.
+
+**Campaign 3** is therefore ten consecutive full-suite runs at HEAD, with instrumentation
+**off**, i.e. exactly the configuration a user or CI gets.
+
+**Result: 10/10 green, 161/161 tests each.** Wall clocks 126s, 126s, 129s, 131s, 133s,
+133s, 139s, 153s, 156s, 186s (median ~133s). Log:
+`handoff/wpbg-3z1-timings/campaign-3-confirmation.txt`.
+
+No stall occurred in campaign 3, which is worth stating rather than glossing: across all
+30 runs in this bead, exactly one stall was observed. That is the honest basis for the
+frequency claim, and it is a thin one.
 
 ## Follow-up filed
 

@@ -11,9 +11,10 @@ export default defineConfig({
     testTimeout: 5000,
 
     // Run test files one at a time. block-runner boots jsdom + the
-    // @wordpress/* tree at its first validate() call, costing 6.6-17.8s per OS
-    // process (wpbg-3z1, 130 boots over 10 runs; p50 7.4s — full distribution
-    // in tests/README.md, re-measurable with `npm run measure:boot`)
+    // @wordpress/* tree at its first validate() call, costing 6.6-87.6s per OS
+    // process (wpbg-3z1, 260 boots over 20 runs; p50 7.6s, and that 87.6s is a
+    // single stalled outlier — full distribution in tests/README.md,
+    // re-measurable with `npm run measure:boot`)
     // (docs/adr/0004-in-process-block-runner-invocation.md). Under
     // file parallelism every worker that pays that boot starts inside the same
     // opening window and they starve each other, so the same test took 8s on
@@ -27,8 +28,9 @@ export default defineConfig({
     // dwarfs their ~15ms of actual test time. No throughput is being traded
     // away, only variance removed.
     //
-    // Serial wall clock has since been re-measured over ten runs as
-    // 116.6-173.1s (wpbg-3z1) — a wider spread than the single 127.3s above.
+    // Serial wall clock has since been re-measured over twenty runs as
+    // 116.6-246s (wpbg-3z1; the 246s is a single stalled run, median ~136s) —
+    // a much wider spread than the single 127.3s above.
     // The parallel-vs-serial comparison itself was not re-run, so the
     // 2026-09-16 figures remain the basis for this setting.
     //
