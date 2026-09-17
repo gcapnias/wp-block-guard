@@ -302,3 +302,85 @@ Ran `/code-review` (Standards + Spec axes). Both reports were acted on:
   measurement narrative being triplicated and drifting between the three sites,
   cost-named constants holding budgets, and the silent divergence from ADR 0004's
   figure → all addressed, with `tests/README.md` now the single source.
+
+---
+
+# Addendum — post-review round (2026-09-17)
+
+Two independent reviewers (Standards and Spec axes) reviewed the commit against
+`develop`. The design was judged faithful and structurally sound; what came back
+was a documentation-and-scoping tail. All findings were confirmed against the
+files before changing anything, and all were correct.
+
+## Five documentation fixes
+
+The irony was the point: a determinism fix whose own docs contradicted it.
+
+1. `tests/README.md` "Known gaps → Performance" still claimed block-runner
+   "spawns a fresh process per validation call (~10s steady-state)" — false since
+   ADR 0004, and contradicted by the intro added in the same commit. Rewritten to
+   describe the once-per-process boot and point at ADR 0004.
+2. `tests/README.md` "Structure → `pipeline.test.js`" still claimed "one real
+   `block-runner` spawn per test where Layer 2 runs". Same stale claim, rewritten.
+3. `tests/pipeline.test.js` said the spawned child "pays the ~7-11s block-runner
+   boot". **7s is below the measured floor** in this report's own table
+   (8.3–13.0s for a CLI invocation). Corrected to 8.3–13.0s — the number was
+   fixed, not the table widened to excuse it.
+4. `tests/README.md` documented the exclude as `exclude: [.claude/worktrees/**]`,
+   dropping the config's actual `...configDefaults.exclude` spread. A reader
+   following the README would have clobbered vitest's defaults. Corrected.
+5. `tests/README.md` said "the other 58 cases in `pipeline.test.js`". The file has
+   60 `it(`, minus 1 raised = **59**. Corrected.
+
+## Scoping fix (AC 4)
+
+`ONE_BOOT_BUDGET_MS` was applied at *describe* level to three `cli.test.js`
+blocks. Eight cases in those blocks spawn a real process but **never reach
+block-runner** — the usage-error and `--version` cases never get that far, and the
+multi-file and backslash-pattern cases use fixtures with blocking structural
+errors, so Layer 2 is skipped. Measured 1.06–1.29s. AC 4 requires budgets
+"scoped to the cases that need it", and this was the same objection the earlier
+`/code-review` raised about the 90s case, fixed there and left standing here.
+
+Budgets are now per case. Only `CLI human output color suppression`, where all
+three cases boot, keeps a describe-level budget.
+
+**One addition beyond the letter of the review.** Dropping those eight cases to
+the 5s default would have made the backslash-pattern case (two node start-ups
+back to back, 2.14–2.47s) the tightest margin in the suite at 2.1x — the exact
+shape of thin budget that caused this bead. It now has its own
+`TWO_SPAWNS_NO_BOOT_BUDGET_MS = 15000` (~6x) with the measurement in its comment.
+The other seven sit on the 5s default at ≥3.9x.
+
+## Verification
+
+Three full runs (one requested; the first came back red, so I took two more
+rather than report a single result either way).
+
+| Run | Result | Wall |
+|---|---|---|
+| 1 | **156/157** — `exits 0 and emits a clean JSON report` blew its 45s budget | 261.2s |
+| 2 | 157/157 | 128.8s |
+| 3 | 157/157 | 148.8s |
+
+## The red run is a real signal, not noise — and it bears on the deferred bead
+
+Run 1's failure was **not** caused by the scoping change: that case carried the
+same 45s budget before and after. A single CLI-child boot exceeded 45s, on a run
+whose wall clock was 2.1x normal.
+
+This is the second such event (the first blew the 45s warm-up hook and led to
+120s). **It is direct evidence for the follow-up bead that was deliberately
+excluded from this round**, whose open question is whether `cli.test.js`'s 45s
+budgets are justified by the same data that justified 120s on the hook. They are
+not: 45s has now been observed insufficient for a child boot on this machine.
+I left both constants untouched as instructed.
+
+One refinement worth carrying into that bead: during the stalled run, the eight
+node-start-up-only cases stayed at 1.10–2.32s, entirely normal. The stall hit the
+**block-runner boot specifically**, not process creation generally — consistent
+with an I/O stall while loading the 350-package `@wordpress/*` + jsdom tree
+(this machine runs OneDrive sync and a PC-manager service over the workspace).
+That suggests the right instrumentation for the follow-up is boot duration
+specifically, and that the fat tail is an I/O phenomenon rather than CPU
+contention.

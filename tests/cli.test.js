@@ -28,13 +28,23 @@ function run(args) {
 // the boot happens in the child, not in this process.
 //
 // These are budgets, not costs. Measurements behind them are in
-// tests/README.md, which is the single place they are recorded. The budgets
-// are attached to the describe blocks that spawn, leaving the pure-unit blocks
-// (`normalizePatternsForPlatform`, `shouldColorize`) on the 5s default.
+// tests/README.md, which is the single place they are recorded.
+//
+// They are attached per case, not per describe, because "spawns the CLI" and
+// "reaches block-runner" are different things. Eight cases here spawn a real
+// process but never boot block-runner — the usage-error and --version cases
+// never get that far, and the multi-file and backslash-pattern cases use
+// fixtures with blocking structural errors, so Layer 2 is skipped. Measured
+// 1.06-1.23s, i.e. node start-up only. Those sit on the 5s default; only the
+// cases that actually pay a boot carry a raised budget.
 const ONE_BOOT_BUDGET_MS = 45000; // ~3.5x the worst single-boot case (13.0s)
 const TWO_BOOT_BUDGET_MS = 90000; // ~3.9x the worst two-boot case (23.1s)
+// Two node start-ups back to back, no block-runner: measured 2.14-2.39s. On the
+// 5s default this would be the tightest margin in the suite (2.1x), which is
+// the shape of thin budget that caused this bead in the first place.
+const TWO_SPAWNS_NO_BOOT_BUDGET_MS = 15000;
 
-describe('CLI wiring', { timeout: ONE_BOOT_BUDGET_MS }, () => {
+describe('CLI wiring', () => {
   it('exits 0 and emits a clean JSON report for a valid file', () => {
     const { status, stdout } = run([fx('valid-heading.html'), '--json']);
     expect(status).toBe(0);
@@ -43,7 +53,7 @@ describe('CLI wiring', { timeout: ONE_BOOT_BUDGET_MS }, () => {
     expect(report.summary).toEqual({ files: 1, errors: 0, warnings: 0, fixed: 0 });
     expect(report.files).toHaveLength(1);
     expect(report.files[0].findings).toEqual([]);
-  });
+  }, ONE_BOOT_BUDGET_MS);
 
   it('exits 1 and reports a BLOCK_INVALID finding for a broken file', () => {
     const { status, stdout } = run([fx('invalid-heading-missing-class.html'), '--json']);
@@ -51,7 +61,7 @@ describe('CLI wiring', { timeout: ONE_BOOT_BUDGET_MS }, () => {
     const report = JSON.parse(stdout);
     expect(report.ok).toBe(false);
     expect(report.files[0].findings[0]).toMatchObject({ code: 'BLOCK_INVALID', blockName: 'core/heading' });
-  });
+  }, ONE_BOOT_BUDGET_MS);
 
   // The only case in the suite that makes two block-runner-backed CLI
   // invocations back to back, so it is the only one needing double the budget.
@@ -74,7 +84,7 @@ describe('CLI wiring', { timeout: ONE_BOOT_BUDGET_MS }, () => {
     expect(status).toBe(1);
     expect(stdout).not.toMatch(/PASS/);
     expect(stdout).toMatch(/FAIL/);
-  });
+  }, ONE_BOOT_BUDGET_MS);
 
   it('exits 2 with no arguments (usage error) and prints help to stderr', () => {
     const { status, stderr } = run([]);
@@ -135,6 +145,7 @@ describe('CLI wiring', { timeout: ONE_BOOT_BUDGET_MS }, () => {
       expect(backslashReport.files).toHaveLength(1);
       expect(path.basename(backslashReport.files[0].file)).toBe('unbalanced-delimiter.html');
     },
+    TWO_SPAWNS_NO_BOOT_BUDGET_MS,
   );
 });
 
@@ -157,7 +168,7 @@ describe('normalizePatternsForPlatform', () => {
   });
 });
 
-describe('CLI --suggest', { timeout: ONE_BOOT_BUDGET_MS }, () => {
+describe('CLI --suggest', () => {
   const tmpFiles = [];
   const tmpDirs = [];
 
@@ -225,13 +236,13 @@ describe('CLI --suggest', { timeout: ONE_BOOT_BUDGET_MS }, () => {
     expect(file.fixApplied).toBe(false);
     expect(file.suggestedOutput).toContain('wp-block-heading');
     expect(file.findings[0].code).toBe('BLOCK_INVALID');
-  });
+  }, ONE_BOOT_BUDGET_MS);
 
   it('reports suggestedOutput as null for a clean file', () => {
     const { status, stdout } = run([fx('valid-heading.html'), '--suggest', '--json']);
     expect(status).toBe(0);
     expect(JSON.parse(stdout).files[0].suggestedOutput).toBeNull();
-  });
+  }, ONE_BOOT_BUDGET_MS);
 
   it('returns one suggestion per matched file, each attributed to its own file', () => {
     // The per-file `search`/`line` mapping is re-derived per result, so a
@@ -259,7 +270,7 @@ describe('CLI --suggest', { timeout: ONE_BOOT_BUDGET_MS }, () => {
     expect(byName['one.html'].suggestedOutput.match(/wp-block-heading/g)).toHaveLength(1);
     expect(byName['two.html'].suggestedOutput.match(/wp-block-heading/g)).toHaveLength(2);
     expect(byName['clean.html'].suggestedOutput).toBeNull();
-  });
+  }, ONE_BOOT_BUDGET_MS);
 });
 
 const ANSI_RE = /\x1b\[\d+m/;

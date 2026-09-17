@@ -15,8 +15,10 @@ at the repo root, and is three settings:
   see "Timeouts and the block-runner boot" below.
 - **`fileParallelism: false`** — test files run one at a time. This is a correctness
   setting, not a speed one (`wpbg-f06`).
-- **`exclude: [.claude/worktrees/**]`** — those are full nested checkouts with their own
-  `tests/*.test.js`, which vitest would otherwise discover and run.
+- **`exclude: [...configDefaults.exclude, '.claude/worktrees/**']`** — the spread keeps
+  vitest's own default exclusions (`node_modules`, `dist`, …); dropping it would clobber
+  them. The added entry covers `.claude/worktrees/*`, which are full nested checkouts
+  with their own `tests/*.test.js` that vitest would otherwise discover and run.
 
 To run a single file or filter by name:
 
@@ -74,8 +76,14 @@ signal.
 |---|---|---|
 | `pipeline.test.js` `beforeAll` | 120s | the one in-process boot |
 | `pipeline.test.js` stderr-containment case | 45s | a boot inside a spawned child |
-| `cli.test.js` three spawning describes | 45s | one boot per case |
+| `cli.test.js` nine block-runner-backed cases | 45s | one boot per case |
 | `cli.test.js` `--strict` case | 90s | two boots back to back |
+| `cli.test.js` backslash-pattern case | 15s | two node start-ups, no boot |
+
+The `cli.test.js` budgets are per case, not per describe: three of its describe blocks
+mix cases that boot with cases that never reach block-runner. Only
+`CLI human output color suppression`, where all three cases boot, carries a
+describe-level budget.
 
 The warm-up hook's 120s looks wildly out of proportion to a 14s worst-case boot,
 and is deliberate. A 45s budget there **did** time out on one run whose wall
@@ -91,7 +99,8 @@ A per-case timeout argument (`it(name, fn, ms)`) overrides a describe-level
 
 Everything else runs on the 5s default, including all 72 cases in
 `structural.test.js`, `php-fragment.test.js`, `report.test.js`, and
-`block-locator.test.js`, and the other 58 cases in `pipeline.test.js`.
+`block-locator.test.js`; the other 59 cases in `pipeline.test.js`; and the eight
+`cli.test.js` cases that spawn the CLI without ever reaching block-runner.
 
 ## Structure
 
@@ -128,8 +137,9 @@ real closer, and that a real closer inside a line comment correctly *is* treated
 ### `pipeline.test.js`
 
 Calls `validateFile()` directly against every fixture in
-`tests/fixtures/wp-block-guard/` (one real `block-runner` spawn per test where Layer 2
-runs), plus `--fix` behavior — copying the invalid fixture to a temp file first, never
+`tests/fixtures/wp-block-guard/` (in-process, so the one block-runner boot is shared
+across the whole file — see "Timeouts and the block-runner boot" above), plus `--fix`
+behavior — copying the invalid fixture to a temp file first, never
 mutating the checked-in fixture — including multi-finding `--fix` and 3-level nested
 mismatched closers.
 
@@ -191,9 +201,11 @@ trailing-PHP-section integration tests). No tests are skipped.
 
 ## Known gaps
 
-- **Performance** is not covered by this suite. `block-runner` spawns a fresh process
-  per validation call (~10s steady-state, regardless of file size); this is a
-  characteristic of `block-runner`'s own startup cost, not something a test can assert
+- **Performance** is not covered by this suite. `block-runner` boots jsdom and the
+  `@wordpress/*` tree once per OS process, at its first `validate()` call (~8-14s,
+  regardless of file size); calls after that cost milliseconds — see ADR 0004, which
+  moved the invocation in-process so the boot is paid once per run rather than once per
+  file. This is `block-runner`'s own startup cost, not something a test can assert
   against without an unrealistic timeout.
 - **`--fix` when `fixMarkup` itself fails or returns null**, and **`BLOCK_RUNNER_FAILURE`**
   (block-runner failing to invoke, or returning unparseable output), are both untested.

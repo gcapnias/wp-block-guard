@@ -477,9 +477,9 @@ describe('block-runner stderr containment', () => {
   // near-miss produces no dump, so the test would pass whether or not the
   // capture works. Measured on this fixture: 14393 bytes without it, 0 with.
   //
-  // The only case in this file that needs a raised budget other than the first
-  // one: spawning the CLI means a second OS process, which pays the ~7-11s
-  // block-runner boot over again rather than reusing the one this worker has
+  // The only case in this file that needs a raised budget: spawning the CLI
+  // means a second OS process, which pays the 8.3-13.0s block-runner boot over
+  // again rather than reusing the one this worker has
   // already paid for — the warm-up hook at the top of this file cannot reach
   // into a child process. It is therefore the one case here that still needs a
   // raised budget. See tests/README.md for the measurements behind the number.
