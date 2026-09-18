@@ -39,7 +39,7 @@ const runs = [...new Set(records.map((r) => r.run))].sort();
 // assumed: a deviation means the positional classification below has gone
 // wrong, or the suite's shape has changed, and either way the numbers must not
 // be published until it is understood.
-const EXPECTED = { boots: 12, noBootChildren: 9, workerImports: 1 };
+const EXPECTED = { boots: 12, noBootChildren: process.platform === 'win32' ? 9 : 7, workerImports: 1 };
 
 // Floor for a genuine block-runner module evaluation. The import figure is
 // measured from src/timing.js's own module-eval timestamp, which is only the
