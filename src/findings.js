@@ -88,7 +88,7 @@ const REGISTRY = {
     severity: 'error',
     message: (o) => `block-runner could not validate this content: ${o.detail}`,
     fix: () =>
-      'Confirm "block-runner" is installed (npm install --save-dev block-runner) and that Node 20.19+, 22.13+, or 24+ is in use.',
+      'Confirm "block-runner" is installed (npm install block-runner) and that Node 20.19+, 22.13+, or 24+ is in use.',
   },
 };
 
