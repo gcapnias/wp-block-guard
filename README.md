@@ -73,6 +73,16 @@ self-sufficient for a coding agent encountering the tool for the first time
 about it, and the recommended generate → validate → fix → revalidate agent loop).
 The source of truth for that text is [`src/help.js`](src/help.js).
 
+An agent using the GitHub `npx` form should self-orient with this command before
+validating or changing markup:
+
+```sh
+npx --allow-git=all github:gcapnias/wp-block-guard -- --help
+```
+
+The `--` separator is required here so `npx` forwards `--help` to
+`wp-block-guard`.
+
 ### Options
 
 | Flag | Effect |
