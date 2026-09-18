@@ -155,3 +155,28 @@ thumb
 sketch
 
 # End of https://www.toptal.com/developers/gitignore/api/node,react
+
+### Project-specific scratch space ###
+# .scratch/ is a temporary workspace for ad-hoc operations; nothing in it is tracked.
+.scratch/*
+!.scratch/.gitkeep
+
+# .firecrawl/ holds output from the firecrawl agent; nothing in it is tracked.
+.firecrawl/*
+!.firecrawl/.gitkeep
+
+### Tool runtime artifacts inside otherwise-tracked directories ###
+# .claude/ is tracked (agents, skills), but agent git worktrees are created inside it.
+# Each is a full checkout with its own .git file and must never be committed.
+.claude/worktrees/
+
+# .beads/ tracks issues.jsonl, but beads_rust leaves transient lock files beside it.
+# .beads/.gitignore already covers "*.lock"; these carry no such suffix.
+# .beads/beads.db-lock-*
+# .beads/beads.db-wal-cert-*-lock-*
+# .beads/beads.db-wal-lock-*
+
+# Compiled standalone executable produced by `npm run compile` (bun build --compile)
+bin/*.exe
+# br doctor per-run artifacts
+.doctor/

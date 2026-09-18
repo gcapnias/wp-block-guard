@@ -1,0 +1,1 @@
+Not a .html or .php file — exists only to confirm wpbv's directory scan ignores non-matching extensions.

@@ -1,0 +1,273 @@
+# wp-block-guard
+
+Pre-publish validator for WordPress Gutenberg block markup (`.html` files and `.php`
+fragments), built for AI coding agents to check their own generated content before
+writing it into a WordPress post — catching the "This block contains unexpected or
+invalid content" editor failure (and the silent content loss "Attempt Block Recovery"
+can cause) *before* it happens, rather than discovering it in the editor.
+
+It is a thin, three-layer wrapper around [`block-runner`](https://github.com/humanmade/block-runner),
+which performs the actual headless-Gutenberg `save()`-diff check, plus two layers that
+close gaps found empirically in `block-runner` alone (see [Design rationale](#design-rationale)).
+
+## Status
+
+Implemented, not yet fully verified end-to-end. Automated verification (manual smoke
+test pass + a vitest suite against fixtures) is in progress — see
+[Verification status](#verification-status) below, which will be updated once that
+work lands.
+
+## Install
+
+```sh
+npm install
+```
+
+Requires **Node >= 20** (a `block-runner` requirement). `block-runner` and `fast-glob`
+are installed as regular dependencies; nothing else is needed at runtime.
+
+## Usage
+
+```sh
+node bin/wp-block-guard.js <file-or-glob...> [options]
+```
+
+Or, once published/linked, as the `wp-block-guard` binary (see `bin` field in
+`package.json`).
+
+```sh
+wp-block-guard content/hero.html
+wp-block-guard "content/**/*.html" "patterns/**/*.php"
+wp-block-guard post-body.html --json
+wp-block-guard post-body.html --fix
+wp-block-guard post-body.html --suggest --json
+```
+
+There are two ways to use this tool, and they differ in who writes the file.
+A **human** checks with `wp-block-guard <file>` and repairs with `--fix`, which
+rewrites the file in place. An **agent** uses `--suggest --json`, which computes
+the same correction, writes nothing, and hands back the corrected file for the
+agent to apply as its own edit — so a whole-document reformat never lands in its
+change set unexplained.
+
+Run `wp-block-guard --help` for the full reference — it is written to be
+self-sufficient for a coding agent encountering the tool for the first time
+(options, exit codes, the exact JSON output shape, every finding code and what to do
+about it, and the recommended generate → validate → fix → revalidate agent loop).
+The source of truth for that text is [`src/help.js`](src/help.js).
+
+### Options
+
+| Flag | Effect |
+| --- | --- |
+| `--json` | Emit a single machine-readable JSON report on stdout instead of human-readable text. |
+| `--strict` | Exit `1` if any warnings are present, not only errors. |
+| `--fix` | Canonicalize near-miss markup in place via block-runner's `canonicalize()`, only for files whose sole findings are block-runner attribute/class/whitespace mismatches. Files with structural errors or embedded PHP interpolation are left untouched and reported as "fix skipped" with a reason. |
+| `--suggest` | Compute exactly what `--fix` would write and return it as `suggestedOutput` — the whole file, PHP header included — instead of writing it. Requires `--json`; cannot be combined with `--fix`. Findings, `ok`, and the exit code keep describing the file **on disk**, so a broken file still exits `1` until the suggestion is applied. Same skip gates as `--fix`, and the suggestion is re-conformed to the input's line endings and trailing-newline state. |
+| `-h`, `--help` | Show the full help text. |
+| `-v`, `--version` | Show the installed version. |
+
+### Exit codes
+
+- `0` — all files passed (no error-severity findings; no warnings either, under `--strict`).
+- `1` — one or more error-severity findings (or warnings, under `--strict`).
+- `2` — usage error: no files matched, a file could not be read, or an unrecoverable internal failure.
+
+## Architecture
+
+```
+bin/wp-block-guard.js      CLI entry point
+src/cli.js                 argv parsing, glob expansion, orchestration, exit code
+src/pipeline.js            per-file pipeline: Layer 0 -> Layer 1 -> Layer 2 -> optional --fix
+src/php-fragment.js        Layer 0: PHP header stripping + embedded-PHP flagging
+src/structural.js          Layer 1: dependency-free block-delimiter balance checker
+src/block-runner-adapter.js Layer 2: calls the installed block-runner library API in-process
+src/findings.js            finding-code registry (code, severity, message, fix)
+src/report.js              aggregates per-file results, formats JSON/human output
+src/help.js                --help text (single source of truth, also feeds the finding-code table)
+src/index.js               library exports (validateFile, buildReport, formatHuman, ...)
+```
+
+### Layer 0 — PHP-fragment extraction and flagging (`src/php-fragment.js`)
+
+For `.php` inputs: strips one leading `<?php ... ?>` header (the conventional wrapper
+for a WordPress pattern file), re-attaching it unchanged around validation/`--fix`.
+Any *other* PHP tag found in the body (interpolation, conditionals, loops mixed into
+the markup) is flagged as `PHP_INTERPOLATION_UNCHECKED` (warning) and masked out
+(same-shaped whitespace, so line numbers downstream stay accurate) before the rest of
+the file is checked — that content is not statically checkable by this tool or by
+block-runner, so a passing result elsewhere in the file must not be read as proof that
+region is safe.
+
+### Layer 1 — structural delimiter pre-check (`src/structural.js`)
+
+A small, dependency-free tokenizer that walks `<!-- (/)?wp:name {json}? (/)?-->`
+delimiters and checks two things block-runner's own parser was found (empirically) not
+to catch: **balance** (every opener has a matching closer, correctly nested) and
+**attribute-JSON validity**. On any of `STRUCTURAL_UNBALANCED_DELIMITER`,
+`STRUCTURAL_MISMATCHED_CLOSER`, or `STRUCTURAL_INVALID_ATTRS_JSON`, block-runner
+validation is skipped entirely (`BLOCK_RUNNER_SKIPPED`) rather than letting it report a
+misleading "valid" on corrupted input.
+
+### Layer 2 — block-runner invocation (`src/block-runner-adapter.js`)
+
+Runs the actual `save()`-diff check against headless Gutenberg by importing and
+calling `block-runner`'s own in-process library API directly —
+`import { validate, canonicalize } from 'block-runner'` — rather than spawning
+its CLI as a subprocess. This is both simpler (no `process.execPath`/`bin`-field
+resolution, no npx overhead) and required for compatibility with `bun build
+--compile` (see `npm run compile` below): a subprocess spawn targeting a
+dependency's script cannot work from inside a compiled binary, since the
+dependency is embedded in Bun's virtual filesystem, which the OS process loader
+cannot open. `validate(markup)` and `canonicalize(markup)` both resolve to the
+same `{ ok, command, summary, items, output? }` report shape the old CLI's
+`--json` output serialized; `fixMarkup()` reads the fixed markup off the
+report's `output` field (the CLI's `fix` verb has no separate library `fix()`
+export — `canonicalize()` is its in-process equivalent).
+
+### Compiling a standalone executable (Bun)
+
+`npm run compile` runs `bun build --compile ./bin/wp-block-guard.js --outfile
+bin/wp-block-guard.exe`, producing a self-contained executable that needs
+neither Node nor a `node_modules` install to run. This requires
+[Bun](https://bun.com) (tested with v1.4.0) on the machine doing the build —
+a build-time-only tool, separate from the `node >=20` `engines` requirement
+for running the CLI normally. The compiled `.exe` is a build artifact, not
+committed to the repo (`bin/*.exe` is gitignored).
+
+**Current status: does not work.** Compiling succeeds, but the resulting
+binary fails to even start — `./bin/wp-block-guard.exe --help` fails exactly
+like `validate` does, with `error: Cannot find module '../data/patch.json'
+from 'B:\~BUN\root\wp-block-guard.exe'`, because `block-runner` (and its
+transitive `jsdom` dependency) is imported at module top level, so the
+failure happens before argv is even parsed. The failure itself is in
+`css-tree` (pulled in via `jsdom`, itself a dependency of `block-runner`),
+which loads a JSON data file via `createRequire(import.meta.url)` + a
+relative `require()` call — a pattern Bun's `--compile` bundler does not
+statically resolve/embed, so the lookup fails against the compiled binary's
+virtual filesystem at runtime. Plain `bun run bin/wp-block-guard.js`
+(uncompiled) works correctly against the same fixtures, confirming the
+in-process library rewrite itself is sound under Bun's runtime — the
+remaining gap is specific to `bun build --compile`'s bundling of this
+transitive dependency, not to `wp-block-guard`'s own code. `node
+bin/wp-block-guard.js` is unaffected and remains the supported way to run
+this tool.
+
+## Finding codes
+
+Every finding has a stable `code`, a `severity` (`error` | `warning` | `info`), a
+`fix` string an agent can act on directly, and `search` — the byte-exact source text at
+fault, or `null` where no single span can be identified with certainty. Under `--suggest`,
+a finding also carries `match`: the verified replacement for `search`, populated only for
+a leaf `BLOCK_INVALID` finding whose correction has actually been re-validated to clear it,
+and `null` otherwise (including on every plain run). `search` and `match` together are an
+LSP-style `TextEdit` expressed as text — replace `search` with `match` for a surgical,
+pre-checked edit instead of applying the whole-file `suggestedOutput`. Full table and
+explanation: run `wp-block-guard --help`, or see the `REGISTRY` in [`src/findings.js`](src/findings.js).
+
+| Code | Severity | Meaning |
+| --- | --- | --- |
+| `PHP_HEADER_STRIPPED` | info | Leading `<?php ... ?>` header removed before validation, re-attached unchanged. |
+| `PHP_INTERPOLATION_UNCHECKED` | warning | PHP tag found mid-markup; that region could not be statically checked. |
+| `PHP_TRAILING_SECTION` | warning | File ends in an unclosed `<?php`/`<?=`; everything from there to EOF is PHP (possibly the whole file) and was not validated as markup. |
+| `STRUCTURAL_UNBALANCED_DELIMITER` | error | A block comment was opened but never closed. |
+| `STRUCTURAL_MISMATCHED_CLOSER` | error | A closing comment doesn't match the innermost open block. |
+| `STRUCTURAL_INVALID_ATTRS_JSON` | error | A block delimiter's attribute JSON does not parse. |
+| `STRUCTURAL_NO_BLOCKS` | warning | No block delimiters found at all; content is unconverted Classic/HTML. |
+| `BLOCK_RUNNER_SKIPPED` | warning | block-runner validation was skipped due to a blocking structural error above. |
+| `BLOCK_INVALID` | error | The actual "unexpected or invalid content" case: stored HTML doesn't match current `save()` output. |
+| `BLOCK_RUNNER_WARNING` | warning | Pass-through of a block-runner warning (e.g. unresolved media, fallback block). |
+| `BLOCK_RUNNER_FAILURE` | error | block-runner could not be invoked or returned unparseable output. |
+
+## Design rationale
+
+Full research and the empirical evidence behind adopting `block-runner` instead of
+building a validator from scratch — including the exact tests that found the two gaps
+Layers 0 and 1 close — is in
+[`archive/2026-09-03-wp-gutenberg-validator-cli-design.md`](archive/2026-09-03-wp-gutenberg-validator-cli-design.md),
+building on the primary-source research in
+[`archive/2026-09-02-wordpress-gutenberg-markup-validation-research.md`](archive/2026-09-02-wordpress-gutenberg-markup-validation-research.md)
+and [`archive/wp-block-validator/`](archive/wp-block-validator/).
+
+## Verification status
+
+_This section is updated as verification work completes; do not treat the tool as
+proven correct until both items below are checked off._
+
+- [x] **Manual smoke test** (help/version output, good/bad/unbalanced/malformed-JSON
+      fixtures, `.php` header stripping and embedded-PHP flagging, multi-file runs,
+      `--strict`, `--fix`, glob support) — complete. Core validation logic (Layers 0/1/2,
+      finding codes, multi-file aggregation, glob support, exit codes 0/1/2) all passed.
+      Found 3 real bugs and 1 performance problem — see [Known issues](#known-issues)
+      below; the 3 correctness bugs have since been fixed and covered by regression tests
+      (see [`tests/README.md`](tests/README.md)).
+- [x] **Automated vitest suite** against fixtures in `tests/fixtures/wp-block-guard/`,
+      covering the pipeline end-to-end plus unit tests for the pure Layer 0/Layer 1
+      functions — complete, 161 tests passing. Full breakdown, fixture-by-fixture coverage:
+      see [`tests/README.md`](tests/README.md).
+
+## Known issues
+
+Found by manual smoke testing on 2026-09-03 (Node install: 350 packages, 0
+vulnerabilities, clean `npm install`).
+
+Items 1–3 below (found by manual smoke testing) have since been **fixed** and are covered
+by regression tests in the automated vitest suite — see [`tests/README.md`](tests/README.md)
+for test coverage:
+
+- ~~`--fix` reports stale pre-fix results.~~ Fixed in `src/pipeline.js`: the pipeline now
+  re-validates the fixed content before building the returned result.
+- ~~Duplicate `PHP_INTERPOLATION_UNCHECKED` findings.~~ Fixed in `src/php-fragment.js`:
+  `scanForEmbeddedPhp` now reports one occurrence per embedded PHP tag, not one per token.
+- ~~`--strict`'s human-readable output shows `✔ PASS` even when the exit code is `1`.~~
+  Fixed in `src/report.js`/`src/cli.js`: `formatHuman()` now takes the `--strict` flag into
+  account when deciding each file's printed PASS/FAIL status.
+- ~~`blockName` is inconsistently namespaced between `BLOCK_INVALID` and `STRUCTURAL_*`
+  findings.~~ Fixed in `src/structural.js`: block-runner's reports are always fully-namespaced,
+  while the structural layer's tokenizer parsed the bare delimiter text — see
+  `qualifyBlockName()` in `src/structural.js` for why and how findings are now made consistent.
+- ~~Multi-file JSON output order does not always match the order files were passed on the
+  command line.~~ Not a bug: `src/cli.js` already sorts resolved file paths
+  (`files.filter(...).sort()`) before processing, so `files[]` order is deterministic — it was
+  just undocumented, which is what made an argument-order comparison look like non-determinism.
+  The guarantee: **files are processed and reported in ascending lexicographic order of their
+  full resolved path (plain JS string `sort()` — UTF-16 code-unit order, not locale-aware, not
+  grouped by directory or basename), never command-line argument order.** Don't rely on
+  `files[]` matching the order patterns were passed on the command line.
+
+Remaining open issue:
+
+1. **Performance: ~10–11s of fixed start-up cost per run.**
+   Booting `block-runner`'s dependency tree (`@wordpress/block-editor`,
+   `@wordpress/block-library`, React, jsdom — 350 packages) dominates every run,
+   regardless of file size. This is a `block-runner` start-up cost, not slowness in
+   `wp-block-guard`'s own logic.
+
+   **This cost used to be paid per _file_, not per run.** Layer 2 spawned
+   `block-runner`'s CLI as a subprocess inside `src/cli.js`'s per-file loop, so the
+   boot repeated for every file: one file took 11.3s and two took 20.6s, and a
+   68-file theme took roughly ten minutes. The adapter now calls `block-runner`’s
+   library API in-process, so the boot happens once per run and each file after the
+   first costs 11–36ms. That same 68-file theme now takes seconds.
+
+   What remains open is the fixed ~10s itself — checking a single file is still
+   slow. Closing that needs a long-lived process the CLI talks to, instead of
+   booting the stack once per invocation.
+   One lead not yet chased: `npm install` blocked a `block-runner` postinstall script
+   (`node scripts/prune-wp-vips.mjs`, which prunes WordPress/vips-related deps)
+   because it is not covered by `allowScripts`. Since the remaining cost is exactly
+   "load a 350-package tree", approving it and re-measuring
+   (`npm install-scripts approve block-runner`) is worth doing before assuming the
+   ~10s is unavoidable.
+
+## Roadmap
+
+- [x] **Standalone executable feasibility** — researched and attempted; see
+      [`handoff/2026-09-03-bun-compile-wp-block-guard-handoff.md`](handoff/2026-09-03-bun-compile-wp-block-guard-handoff.md)
+      and
+      [`handoff/2026-09-03-bun-compile-implementation-report.md`](handoff/2026-09-03-bun-compile-implementation-report.md).
+      The in-process adapter it recommended has landed; `bun build --compile` itself is
+      blocked upstream (see above).
+- `handoff/` holds implementation handoff documents for follow-on work, written before a
+  worktree is torn down so the findings outlive it.
+

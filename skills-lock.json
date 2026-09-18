@@ -8,12 +8,6 @@
       "skillPath": "skills/engineering/ask-matt/SKILL.md",
       "computedHash": "e5404aef8525ca0c8fc76692567a38dfdd5d0cc1a9f8d47c02c18f29f60d92a6"
     },
-    "br": {
-      "source": "dicklesworthstone/beads_rust",
-      "sourceType": "github",
-      "skillPath": ".claude/skills/br/SKILL.md",
-      "computedHash": "68d979ce10209b77b2eefa718f55cc921d018570adf44d3a1bc327178d2a5b4f"
-    },
     "ce-commit": {
       "source": "everyinc/compound-engineering-plugin",
       "sourceType": "github",
@@ -52,7 +46,7 @@
       "source": "firecrawl/skills",
       "sourceType": "github",
       "skillPath": "skills/core/firecrawl/SKILL.md",
-      "computedHash": "adc5d358a53862401ab725f53cbba391120ee9df5e756bbeab136748b8b2a070"
+      "computedHash": "c3086c55441701fa41b2925f0dd9a8e4b8eef291f28ec06d72bdb739054d283a"
     },
     "firecrawl-developer-index": {
       "source": "firecrawl/skills",
@@ -94,6 +88,13 @@
       "sourceType": "github",
       "skillPath": "skills/engineering/implement/SKILL.md",
       "computedHash": "130cac2d72bfde8cd526bf3b754211e2fe00e84bc4d9f9c56f749b9541a3afad"
+    },
+    "implement-spec": {
+      "source": "mattpocock/skills",
+      "ref": "main",
+      "sourceType": "github",
+      "skillPath": "skills/in-progress/implement-spec/SKILL.md",
+      "computedHash": "1bbece7b74c00d938ecb79e2337310d8c3c2c307b48f105026e161601b1c6be8"
     },
     "improve-codebase-architecture": {
       "source": "mattpocock/skills",
