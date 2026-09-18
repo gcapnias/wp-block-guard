@@ -22,21 +22,26 @@ Implemented and verified: a manual smoke test pass plus an automated vitest suit
 npm install
 ```
 
-Requires **Node >= 20** (a `block-runner` requirement). `block-runner` and `fast-glob`
+Requires **Node 20.19+, 22.13+, or 24+** (a `block-runner` requirement). `block-runner` and `fast-glob`
 are installed as regular dependencies; nothing else is needed at runtime.
 
 ### Run without installing (npx)
 
 ```sh
-npx github:gcapnias/wp-block-guard content/hero.html
+npx --allow-git=all github:gcapnias/wp-block-guard content/hero.html
 ```
 
-Runs the CLI straight from this repo's default branch, no local clone or
-`npm install` step. `npx` caches the install after the first run, but each *first*
-invocation still pays the same one-time `npm install` plus block-runner's ~10s boot
-cost described in [Known issues](#known-issues) below. There is no published npm
-package or version tag yet, so this always runs the latest commit on `main` — pin a
-commit (`npx github:gcapnias/wp-block-guard#<sha>`) if you need a reproducible version.
+Runs the CLI straight from this repo's default branch, no local clone step. As of
+npm 12, `--allow-git=all` is required: npm blocks git-reference installs by default
+(`allow-git` config, default `none`), since a git dependency can run arbitrary
+install-time configuration outside npm's usual registry controls — opt in per
+command like this rather than changing your global npm config. `npx` caches the
+install after the first run, but each *first* invocation still pays a one-time
+install plus block-runner's ~10s boot cost described in [Known issues](#known-issues)
+below. There is no published npm package or version tag yet, so this always runs the
+latest commit on `main` — pin a commit
+(`npx --allow-git=all github:gcapnias/wp-block-guard#<sha>`) if you need a
+reproducible version.
 
 ## Usage
 
@@ -67,6 +72,16 @@ self-sufficient for a coding agent encountering the tool for the first time
 (options, exit codes, the exact JSON output shape, every finding code and what to do
 about it, and the recommended generate → validate → fix → revalidate agent loop).
 The source of truth for that text is [`src/help.js`](src/help.js).
+
+An agent using the GitHub `npx` form should self-orient with this command before
+validating or changing markup:
+
+```sh
+npx --allow-git=all github:gcapnias/wp-block-guard -- --help
+```
+
+The `--` separator is required here so `npx` forwards `--help` to
+`wp-block-guard`.
 
 ### Options
 
@@ -143,7 +158,7 @@ export — `canonicalize()` is its in-process equivalent).
 bin/wp-block-guard.exe`, producing a self-contained executable that needs
 neither Node nor a `node_modules` install to run. This requires
 [Bun](https://bun.com) (tested with v1.4.0) on the machine doing the build —
-a build-time-only tool, separate from the `node >=20` `engines` requirement
+a build-time-only tool, separate from the published Node-version requirement
 for running the CLI normally. The compiled `.exe` is a build artifact, not
 committed to the repo (`bin/*.exe` is gitignored).
 

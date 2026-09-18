@@ -130,26 +130,49 @@ export async function validateMarkup(markup) {
 }
 
 /**
- * Canonicalize near-miss markup via block-runner's `canonicalize()` (the
- * library equivalent of the CLI's `fix` command).
+ * Canonicalize markup via block-runner's `canonicalize()` (the library
+ * equivalent of the CLI's `fix` command), retaining whether the result is
+ * safe for this wrapper to write.
+ *
+ * block-runner 0.9.x can rebuild an invalid block from its parsed attributes.
+ * That result is valid, but it carries a warning that the original styling
+ * may differ. This wrapper's auto-fix contract is lossless canonicalization,
+ * so a warning makes the candidate unsafe rather than a correction to write.
  * @param {string} markup
- * @returns {Promise<string|null>} the fixed markup, or null on failure
+ * @returns {Promise<{ output: string|null, unsafe: boolean }>} a safe fixed
+ *   markup string when available, or metadata explaining why none is offered
  */
-export async function fixMarkup(markup) {
+export async function canonicalizeMarkup(markup) {
   const run = await captureStderr(() => timed(() => canonicalize(markup)));
   if (!run.ok) {
-    // This function's contract is `string | null`, so there is no field to
-    // hand the captured output back on. Write it through to the real stderr
-    // instead of dropping it — a thrown canonicalize is precisely when it
-    // explains the failure.
+    // `fixMarkup()` retains a `string | null` compatibility surface, so
+    // neither it nor this structured result has a stderr field. Write
+    // captured output through rather than dropping the explanation for a
+    // thrown canonicalize.
     if (run.captured) process.stderr.write(run.captured);
-    return null;
+    return { output: null, unsafe: false };
   }
   // Confirmed empirically (node .scratch probe against
   // tests/fixtures/wp-block-guard/invalid-heading-missing-class.html):
   // the fixed markup string is exposed on `report.output`, not
   // `report.markup`/`report.result`.
   const report = run.value;
-  if (!report || typeof report.output !== 'string') return null;
-  return report.output;
+  if (!report || typeof report.output !== 'string') return { output: null, unsafe: false };
+
+  // 0.9.x has no structured code for this rebuilding path. Rejecting every
+  // warning is deliberately conservative: a warning means block-runner has
+  // qualified the safety of its output, which is incompatible with an
+  // unattended, lossless --fix or --suggest result.
+  const unsafe = Array.isArray(report.items) && report.items.some((item) => item.status === 'warning');
+  return { output: unsafe ? null : report.output, unsafe };
+}
+
+/**
+ * Return only a safe canonicalization result for callers that need the
+ * established `string | null` correction contract.
+ * @param {string} markup
+ * @returns {Promise<string|null>} the safely fixed markup, or null
+ */
+export async function fixMarkup(markup) {
+  return (await canonicalizeMarkup(markup)).output;
 }

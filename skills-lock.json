@@ -12,7 +12,14 @@
       "source": "everyinc/compound-engineering-plugin",
       "sourceType": "github",
       "skillPath": "skills/ce-commit/SKILL.md",
-      "computedHash": "5990d8003caf3f57a17cd325b8b4031be7600d54e35490f5c509c99f91ec5ec8"
+      "computedHash": "cf6b7aebc2c501adc3b944c15989eda19976b1c478c36bf7e7ce43d8c0dbd2cd"
+    },
+    "claude-handoff": {
+      "source": "mattpocock/skills",
+      "ref": "main",
+      "sourceType": "github",
+      "skillPath": "skills/in-progress/claude-handoff/SKILL.md",
+      "computedHash": "c0fa5d0eede556bc7809c8461a25ec2c7db5726f338970458aa7bbf702b8ea8c"
     },
     "code-review": {
       "source": "mattpocock/skills",
@@ -103,6 +110,13 @@
       "skillPath": "skills/engineering/improve-codebase-architecture/SKILL.md",
       "computedHash": "016f12709bff30a27419e8add978a9be70f5ca1fb6738b3be6793038e0aba631"
     },
+    "loop-me": {
+      "source": "mattpocock/skills",
+      "ref": "main",
+      "sourceType": "github",
+      "skillPath": "skills/in-progress/loop-me/SKILL.md",
+      "computedHash": "d7fbcf41b5af203a6f2a7937afaaaebdd9941b0aa4cc3654b52daec01d3fb564"
+    },
     "prototype": {
       "source": "mattpocock/skills",
       "ref": "main",
@@ -129,7 +143,7 @@
       "ref": "main",
       "sourceType": "github",
       "skillPath": "skills/in-progress/retro/SKILL.md",
-      "computedHash": "371bfc87b0fbb221e2e802e51385b5e1461c052cfa1186b18d4b441c00383eb5"
+      "computedHash": "e63bb774fba4e601edfffc56bbd5c938d76c8faa2dff49456dff3b1e679cd3b6"
     },
     "setup-matt-pocock-skills": {
       "source": "mattpocock/skills",

@@ -34,7 +34,7 @@
   "markdown.preview.fontFamily": "Bookerly, 'Trebuchet MS', sans-serif",
   "markdown.preview.fontSize": 15,
   "powershell.integratedConsole.showOnStartup": false,
-  "terminal.integrated.fontFamily": "'Cascadia Code PL', Consolas, 'Courier New', monospace",
+  "terminal.integrated.fontFamily": "'Cascadia Mono PL', Consolas, 'Courier New', monospace",
   "terminal.integrated.fontSize": 16,
   "terminal.integrated.fontWeight": "normal",
   "terminal.integrated.gpuAcceleration": "auto",

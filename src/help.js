@@ -155,7 +155,7 @@ WHY THIS EXISTS (do not skip if deciding whether to trust this output)
   and archive/2026-09-02-wordpress-gutenberg-markup-validation-research.md.
 
 PREREQUISITES
-  Node >= 20 (required by block-runner). block-runner is installed as this
+  Node 20.19+, 22.13+, or 24+ (required by block-runner). block-runner is installed as this
   package's own dependency and is called in-process via its library API
   (import { validate, canonicalize } from 'block-runner'), not spawned as a
   subprocess, so that the one-time cost of booting jsdom and the
