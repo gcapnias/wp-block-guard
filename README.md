@@ -28,15 +28,20 @@ are installed as regular dependencies; nothing else is needed at runtime.
 ### Run without installing (npx)
 
 ```sh
-npx github:gcapnias/wp-block-guard content/hero.html
+npx --allow-git=all github:gcapnias/wp-block-guard content/hero.html
 ```
 
-Runs the CLI straight from this repo's default branch, no local clone or
-`npm install` step. `npx` caches the install after the first run, but each *first*
-invocation still pays the same one-time `npm install` plus block-runner's ~10s boot
-cost described in [Known issues](#known-issues) below. There is no published npm
-package or version tag yet, so this always runs the latest commit on `main` — pin a
-commit (`npx github:gcapnias/wp-block-guard#<sha>`) if you need a reproducible version.
+Runs the CLI straight from this repo's default branch, no local clone step. As of
+npm 12, `--allow-git=all` is required: npm blocks git-reference installs by default
+(`allow-git` config, default `none`), since a git dependency can run arbitrary
+install-time configuration outside npm's usual registry controls — opt in per
+command like this rather than changing your global npm config. `npx` caches the
+install after the first run, but each *first* invocation still pays a one-time
+install plus block-runner's ~10s boot cost described in [Known issues](#known-issues)
+below. There is no published npm package or version tag yet, so this always runs the
+latest commit on `main` — pin a commit
+(`npx --allow-git=all github:gcapnias/wp-block-guard#<sha>`) if you need a
+reproducible version.
 
 ## Usage
 
