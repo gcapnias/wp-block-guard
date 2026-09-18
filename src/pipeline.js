@@ -8,7 +8,7 @@ import {
   firstPhpOpenerIndex,
 } from './php-fragment.js';
 import { runStructuralLayer, BLOCKING_STRUCTURAL_CODES } from './structural.js';
-import { validateMarkup, fixMarkup } from './block-runner-adapter.js';
+import { validateMarkup, fixMarkup, canonicalizeMarkup } from './block-runner-adapter.js';
 import { makeFinding } from './findings.js';
 import { resolveItemLines, resolveMatch } from './block-locator.js';
 
@@ -303,9 +303,12 @@ export async function validateFile(filePath, options = {}) {
     } else if (!onlyBlockRunnerFindings) {
       fixSkippedReason = 'Contains findings outside block-runner\'s scope; not safely auto-fixable.';
     } else {
-      const fixedBody = await fixMarkup(body);
+      const canonicalized = await canonicalizeMarkup(body);
+      const fixedBody = canonicalized.output;
       if (fixedBody == null) {
-        fixSkippedReason = 'block-runner "fix" did not produce output.';
+        fixSkippedReason = canonicalized.unsafe
+          ? 'block-runner "fix" warned that rebuilding may change authored styling; not safely auto-fixable.'
+          : 'block-runner "fix" did not produce output.';
       } else if (suggest) {
         // The agent workflow: hand back exactly what --fix would have written
         // and leave the file alone. Deliberately no re-validate — the one in

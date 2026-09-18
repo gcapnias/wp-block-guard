@@ -22,7 +22,7 @@ Implemented and verified: a manual smoke test pass plus an automated vitest suit
 npm install
 ```
 
-Requires **Node >= 20** (a `block-runner` requirement). `block-runner` and `fast-glob`
+Requires **Node 20.19+, 22.13+, or 24+** (a `block-runner` requirement). `block-runner` and `fast-glob`
 are installed as regular dependencies; nothing else is needed at runtime.
 
 ### Run without installing (npx)
@@ -158,7 +158,7 @@ export — `canonicalize()` is its in-process equivalent).
 bin/wp-block-guard.exe`, producing a self-contained executable that needs
 neither Node nor a `node_modules` install to run. This requires
 [Bun](https://bun.com) (tested with v1.4.0) on the machine doing the build —
-a build-time-only tool, separate from the `node >=20` `engines` requirement
+a build-time-only tool, separate from the published Node-version requirement
 for running the CLI normally. The compiled `.exe` is a build artifact, not
 committed to the repo (`bin/*.exe` is gitignored).
 

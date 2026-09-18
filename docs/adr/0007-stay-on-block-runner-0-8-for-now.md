@@ -1,17 +1,12 @@
-# Stay on block-runner 0.8.x for now
+# Adopt block-runner 0.9.7 while preserving lossless canonicalization
 
-Status: proposed 2026-09-19
+Status: accepted 2026-09-19
 
-This assessment recommends staying on 0.8.x; maintainer sign-off is required
-before changing the dependency or support policy. Revisit when the maintainer
-explicitly accepts the canonicalization contract changes and the Node support
-policy is updated.
+The maintainer approved block-runner 0.9.7's Node support policy on 2026-09-19.
 
 ## Context
 
-This repository uses block-runner as Layer 2 of its validate/fix pipeline. The
-published dependency range is `^0.8.0`, and the repository's package contract
-currently declares `engines.node: ">=20"`.
+This repository uses block-runner as Layer 2 of its validate/fix pipeline.
 
 Block-runner 0.9.0--0.9.7 add source-bound authoring, registered-block and
 plugin workflows, and native style adapters. Version 0.9.7 also adds
@@ -20,17 +15,15 @@ plugin workflows, and native style adapters. Version 0.9.7 also adds
 
 ## Decision
 
-Stay on `block-runner` 0.8.x for now. Do not change `package.json`,
-`package-lock.json`, or `engines.node` as part of this assessment.
+Adopt `block-runner` 0.9.7 and set this package's published Node support range
+to `^20.19.0 || ^22.13.0 || >=24.0.0`, matching upstream.
 
-The existing suite is not behavior-compatible with 0.9.7. With 0.9.7
-actually installed, 156 of 161 tests passed. Four pipeline tests failed
-because 0.9.7's `canonicalize()` repairs the fixture that 0.8.x leaves as a
-residual invalid block; the tests intentionally assert the residual finding
-and a `null` match when canonicalization does not resolve the finding. The
-same three residual tests passed against 0.8.0. This is a contract change for
-the wrapper's current findings and suggestion behavior, not a version-only
-upgrade.
+0.9.7 can rebuild invalid blocks from parsed attributes. Its warning says that
+original styling may differ, so treating that output as an unattended fix
+would violate this wrapper's lossless canonicalization contract. The adapter
+therefore declines every warning-bearing canonicalization result: `--fix`
+leaves the file untouched and `--suggest` returns no candidate. Ordinary
+warning-free near-miss canonicalization remains available.
 
 The fifth full-suite failure was an environment issue: this checkout inherits
 `NO_COLOR=1`, while the isolated `shouldColorize` unit test expects that
@@ -53,19 +46,12 @@ future adoption would need its own ticket, scope, and acceptance tests.
 
 ## Revisit trigger
 
-Reconsider 0.9.x when all of the following are true:
-
-1. The maintainer approves the changed canonicalization semantics and the
-   wrapper's residual/suggestion tests are deliberately updated or replaced.
-2. The maintainer decides whether this published CLI package should narrow its
-   Node support to `^20.19.0 || ^22.13.0 || >=24.0.0`; that support-policy
-   change must land separately.
-3. A fresh full-suite run on the chosen 0.9.x release confirms the stderr
-   capture, PHP masking, line/search mapping, and fix/suggest contracts.
+Revisit the warning gate if block-runner adds a stable structured signal that
+distinguishes lossy rebuilds from other warnings. Until then, rejecting all
+warning-bearing canonicalization results is the safe default.
 
 ## Consequences
 
-The repository keeps its current validated behavior and broad declared Node
-floor. It does not receive 0.9.x's unrelated authoring capabilities, and it
-will need a deliberate migration when the canonicalization and Node-policy
-decisions are made.
+The repository receives 0.9.7's validation improvements without silently
+dropping authored attributes. It does not adopt 0.9.x's unrelated authoring
+capabilities.

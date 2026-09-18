@@ -433,21 +433,7 @@ describe('validateFile — --fix line-ending fidelity (wpbg-8j7)', () => {
     expect(written).not.toMatch(/\n$/);
   });
 
-  // The one shape where conforming and not conforming would actually diverge:
-  // a --fix run that leaves a residual finding standing (block-runner cannot
-  // resolve it) on a CRLF input, where the finding's resolved span crosses a
-  // line boundary. A single-line span (e.g. unfixable-extra-attribute.html's)
-  // contains no EOL at all, so it would pass identically whether `body` is
-  // the conformed CRLF string or the unconformed LF `fixedBody` — a vacuous
-  // test. This fixture nests a paragraph inside the offending group so the
-  // resolved span for the group's BLOCK_INVALID runs across three lines,
-  // making the CRLF/LF distinction actually load-bearing.
-  //
-  // Verified directly (not assumed): reverting the write path to reassign
-  // `body = fixedBody` instead of the conformed string makes this test fail
-  // (`search` comes back with LF, `written` has CRLF, no match) — so this is
-  // not decoration.
-  it('emits a byte-exact search for a residual, multi-line finding on a CRLF input after --fix', async () => {
+  it('does not rewrite a CRLF file when canonicalization warns of a lossy rebuild', async () => {
     const markup = [
       '<!-- wp:group {"className":"word-cloud-bg","layout":{"type":"default"}} -->',
       '<div class="wp-block-group word-cloud-bg" aria-hidden="true"><!-- wp:paragraph -->',
@@ -464,13 +450,13 @@ describe('validateFile — --fix line-ending fidelity (wpbg-8j7)', () => {
     const result = await validateFile(tmpFile, { fix: true });
     const residual = result.findings.filter((f) => f.code === 'BLOCK_INVALID');
     expect(residual.length).toBeGreaterThan(0);
+    expect(result.fixApplied).toBe(false);
+    expect(result.fixSkippedReason).toMatch(/may change authored styling/i);
 
     const written = await fs.readFile(tmpFile, 'utf8');
-    expect(written).toMatch(/\r\n/);
+    expect(written).toBe(crlf);
     for (const finding of residual) {
       expect(finding.search).not.toBeNull();
-      // A finding whose span crosses a line boundary must carry CRLF here,
-      // or the CRLF/LF distinction wouldn't be exercised at all.
       expect(finding.search).toMatch(/\r\n/);
       expect(written).toContain(finding.search);
     }
@@ -570,10 +556,7 @@ describe('validateFile — positions after --fix', () => {
     await Promise.all(tmpFiles.map((f) => fs.rm(f, { force: true })));
   });
 
-  // The post-fix re-validate resolves positions against canonicalize's output
-  // rather than the original file, so this covers the second call site in
-  // src/pipeline.js, not just the first.
-  it('locates a residual finding against the rewritten file', async () => {
+  it('locates a lossy-rebuild finding against the untouched file', async () => {
     const tmpFile = path.join(os.tmpdir(), `wp-block-guard-fix-residual-${Date.now()}.html`);
     tmpFiles.push(tmpFile);
     await fs.writeFile(tmpFile, await fs.readFile(fx('unfixable-extra-attribute.html'), 'utf8'), 'utf8');
@@ -581,6 +564,7 @@ describe('validateFile — positions after --fix', () => {
     const result = await validateFile(tmpFile, { fix: true });
     const residual = result.findings.filter((f) => f.code === 'BLOCK_INVALID');
     expect(residual.length).toBeGreaterThan(0);
+    expect(result.fixApplied).toBe(false);
 
     const lines = (await fs.readFile(tmpFile, 'utf8')).split('\n');
     for (const finding of residual) {
@@ -682,7 +666,7 @@ describe('validateFile — search (wpbg-qlm)', () => {
     expectFindableIn(await fs.readFile(file, 'utf8'), result.findings);
   });
 
-  it('slices a post-fix finding from the rewritten file, not the original', async () => {
+  it('keeps a lossy-rebuild finding findable in the untouched file', async () => {
     const tmpFile = path.join(os.tmpdir(), `wp-block-guard-search-residual-${Date.now()}.html`);
     tmpFiles.push(tmpFile);
     await fs.writeFile(tmpFile, await fs.readFile(fx('unfixable-extra-attribute.html'), 'utf8'), 'utf8');
@@ -690,8 +674,6 @@ describe('validateFile — search (wpbg-qlm)', () => {
     const result = await validateFile(tmpFile, { fix: true });
     const residual = result.findings.filter((f) => f.code === 'BLOCK_INVALID');
     expect(residual.length).toBeGreaterThan(0);
-    // --fix reflows the whole document, so text sliced out of the pre-fix
-    // content would not be found in what is now on disk.
     expectFindableIn(await fs.readFile(tmpFile, 'utf8'), result.findings);
   });
 });
@@ -779,19 +761,14 @@ describe('validateFile — --suggest', () => {
     expect(result.suggestedOutput.split('<?php').length - 1).toBe(1);
   });
 
-  it('still suggests, and still reports the finding, when the fix cannot resolve it', async () => {
-    // Parity with --fix in the direction that matters: --fix *writes* this
-    // file and leaves the finding standing, so withholding a suggestion here
-    // would be stricter than --fix rather than equal to it. Verifying that
-    // applying a suggestion clears a finding is wpbg-lsf's design, not this
-    // bead's.
+  it('withholds a suggestion when canonicalization warns of a lossy rebuild', async () => {
     const tmpFile = await copyToTmp('unfixable-extra-attribute.html');
     const result = await validateFile(tmpFile, { suggest: true });
 
-    expect(result.suggestedOutput).not.toBeNull();
+    expect(result.suggestedOutput).toBeNull();
     expect(result.ok).toBe(false);
     expect(result.findings.some((f) => f.code === 'BLOCK_INVALID')).toBe(true);
-    expect(result.fixSkippedReason).toBeNull();
+    expect(result.fixSkippedReason).toMatch(/may change authored styling/i);
   });
 
   it('skips suggesting for blocking structural errors, reusing the --fix reason text', async () => {
