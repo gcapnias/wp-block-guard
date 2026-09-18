@@ -2,7 +2,7 @@
 
 ### Issue tracker
 
-Issues live in the local beads_rust tracker (`br` CLI); see `docs/agents/issue-tracker.md`.
+Issues live as GitHub issues in this repo (`gh` CLI); see `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
