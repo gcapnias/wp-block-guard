@@ -203,7 +203,7 @@ proven correct until both items below are checked off._
       (see [`tests/README.md`](tests/README.md)).
 - [x] **Automated vitest suite** against fixtures in `tests/fixtures/wp-block-guard/`,
       covering the pipeline end-to-end plus unit tests for the pure Layer 0/Layer 1
-      functions — complete, 48 tests passing. Full breakdown, fixture-by-fixture coverage:
+      functions — complete, 161 tests passing. Full breakdown, fixture-by-fixture coverage:
       see [`tests/README.md`](tests/README.md).
 
 ## Known issues
