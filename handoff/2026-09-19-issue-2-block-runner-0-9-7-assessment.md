@@ -1,5 +1,9 @@
 # Ticket #2 assessment: block-runner 0.9.7
 
+> Superseded on 2026-09-19 by the maintainer-approved adoption in
+> `handoff/2026-09-19-issue-2-block-runner-0-9-7-adoption-report.md`.
+> This report remains as the evidence gathered before that decision.
+
 ## Recommendation
 
 Stay on the current `block-runner` `^0.8.0` range for now. Do not land a
@@ -10,7 +14,7 @@ against the real installed package produced four pipeline failures caused by
 changed canonicalization behavior. The new authoring capabilities are not
 needed by this repository's validate/fix workflow. The detailed decision and
 revisit trigger are recorded in
-[`docs/adr/0007-stay-on-block-runner-0-8-for-now.md`](../docs/adr/0007-stay-on-block-runner-0-8-for-now.md).
+[`docs/adr/0007-adopt-block-runner-0-9-7-with-lossless-canonicalization.md`](../docs/adr/0007-adopt-block-runner-0-9-7-with-lossless-canonicalization.md).
 
 ## Installation and package evidence
 
@@ -144,7 +148,7 @@ explicitly scoped ticket.
 
 ## Files changed
 
-- `docs/adr/0007-stay-on-block-runner-0-8-for-now.md` — decision, evidence
+- `docs/adr/0007-adopt-block-runner-0-9-7-with-lossless-canonicalization.md` — decision, evidence
   summary, and revisit trigger.
 - `handoff/2026-09-19-issue-2-block-runner-0-9-7-assessment.md` — durable
   implementation/investigation report.

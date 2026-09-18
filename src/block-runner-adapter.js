@@ -145,10 +145,10 @@ export async function validateMarkup(markup) {
 export async function canonicalizeMarkup(markup) {
   const run = await captureStderr(() => timed(() => canonicalize(markup)));
   if (!run.ok) {
-    // This function's contract is `string | null`, so there is no field to
-    // hand the captured output back on. Write it through to the real stderr
-    // instead of dropping it — a thrown canonicalize is precisely when it
-    // explains the failure.
+    // `fixMarkup()` retains a `string | null` compatibility surface, so
+    // neither it nor this structured result has a stderr field. Write
+    // captured output through rather than dropping the explanation for a
+    // thrown canonicalize.
     if (run.captured) process.stderr.write(run.captured);
     return { output: null, unsafe: false };
   }
