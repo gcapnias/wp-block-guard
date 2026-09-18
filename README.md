@@ -12,10 +12,9 @@ close gaps found empirically in `block-runner` alone (see [Design rationale](#de
 
 ## Status
 
-Implemented, not yet fully verified end-to-end. Automated verification (manual smoke
-test pass + a vitest suite against fixtures) is in progress — see
-[Verification status](#verification-status) below, which will be updated once that
-work lands.
+Implemented and verified: a manual smoke test pass plus an automated vitest suite
+(161 tests passing) against fixtures have both completed — see
+[`tests/README.md`](tests/README.md) for coverage detail.
 
 ## Install
 
@@ -25,6 +24,19 @@ npm install
 
 Requires **Node >= 20** (a `block-runner` requirement). `block-runner` and `fast-glob`
 are installed as regular dependencies; nothing else is needed at runtime.
+
+### Run without installing (npx)
+
+```sh
+npx github:gcapnias/wp-block-guard content/hero.html
+```
+
+Runs the CLI straight from this repo's default branch, no local clone or
+`npm install` step. `npx` caches the install after the first run, but each *first*
+invocation still pays the same one-time `npm install` plus block-runner's ~10s boot
+cost described in [Known issues](#known-issues) below. There is no published npm
+package or version tag yet, so this always runs the latest commit on `main` — pin a
+commit (`npx github:gcapnias/wp-block-guard#<sha>`) if you need a reproducible version.
 
 ## Usage
 
@@ -162,22 +174,19 @@ a finding also carries `match`: the verified replacement for `search`, populated
 a leaf `BLOCK_INVALID` finding whose correction has actually been re-validated to clear it,
 and `null` otherwise (including on every plain run). `search` and `match` together are an
 LSP-style `TextEdit` expressed as text — replace `search` with `match` for a surgical,
-pre-checked edit instead of applying the whole-file `suggestedOutput`. Full table and
-explanation: run `wp-block-guard --help`, or see the `REGISTRY` in [`src/findings.js`](src/findings.js).
+pre-checked edit instead of applying the whole-file `suggestedOutput`.
+
+A couple of representative codes:
 
 | Code | Severity | Meaning |
 | --- | --- | --- |
-| `PHP_HEADER_STRIPPED` | info | Leading `<?php ... ?>` header removed before validation, re-attached unchanged. |
-| `PHP_INTERPOLATION_UNCHECKED` | warning | PHP tag found mid-markup; that region could not be statically checked. |
-| `PHP_TRAILING_SECTION` | warning | File ends in an unclosed `<?php`/`<?=`; everything from there to EOF is PHP (possibly the whole file) and was not validated as markup. |
-| `STRUCTURAL_UNBALANCED_DELIMITER` | error | A block comment was opened but never closed. |
-| `STRUCTURAL_MISMATCHED_CLOSER` | error | A closing comment doesn't match the innermost open block. |
-| `STRUCTURAL_INVALID_ATTRS_JSON` | error | A block delimiter's attribute JSON does not parse. |
-| `STRUCTURAL_NO_BLOCKS` | warning | No block delimiters found at all; content is unconverted Classic/HTML. |
-| `BLOCK_RUNNER_SKIPPED` | warning | block-runner validation was skipped due to a blocking structural error above. |
 | `BLOCK_INVALID` | error | The actual "unexpected or invalid content" case: stored HTML doesn't match current `save()` output. |
-| `BLOCK_RUNNER_WARNING` | warning | Pass-through of a block-runner warning (e.g. unresolved media, fallback block). |
-| `BLOCK_RUNNER_FAILURE` | error | block-runner could not be invoked or returned unparseable output. |
+| `STRUCTURAL_UNBALANCED_DELIMITER` | error | A block comment was opened but never closed. |
+| `PHP_INTERPOLATION_UNCHECKED` | warning | PHP tag found mid-markup; that region could not be statically checked. |
+
+Full table and explanation: run `wp-block-guard --help`, or see the `REGISTRY` in
+[`src/findings.js`](src/findings.js) — the single source of truth for finding codes,
+kept here only as a taste of what's available.
 
 ## Design rationale
 
@@ -189,53 +198,12 @@ building on the primary-source research in
 [`archive/2026-09-02-wordpress-gutenberg-markup-validation-research.md`](archive/2026-09-02-wordpress-gutenberg-markup-validation-research.md)
 and [`archive/wp-block-validator/`](archive/wp-block-validator/).
 
-## Verification status
-
-_This section is updated as verification work completes; do not treat the tool as
-proven correct until both items below are checked off._
-
-- [x] **Manual smoke test** (help/version output, good/bad/unbalanced/malformed-JSON
-      fixtures, `.php` header stripping and embedded-PHP flagging, multi-file runs,
-      `--strict`, `--fix`, glob support) — complete. Core validation logic (Layers 0/1/2,
-      finding codes, multi-file aggregation, glob support, exit codes 0/1/2) all passed.
-      Found 3 real bugs and 1 performance problem — see [Known issues](#known-issues)
-      below; the 3 correctness bugs have since been fixed and covered by regression tests
-      (see [`tests/README.md`](tests/README.md)).
-- [x] **Automated vitest suite** against fixtures in `tests/fixtures/wp-block-guard/`,
-      covering the pipeline end-to-end plus unit tests for the pure Layer 0/Layer 1
-      functions — complete, 161 tests passing. Full breakdown, fixture-by-fixture coverage:
-      see [`tests/README.md`](tests/README.md).
-
 ## Known issues
 
 Found by manual smoke testing on 2026-09-03 (Node install: 350 packages, 0
-vulnerabilities, clean `npm install`).
-
-Items 1–3 below (found by manual smoke testing) have since been **fixed** and are covered
-by regression tests in the automated vitest suite — see [`tests/README.md`](tests/README.md)
-for test coverage:
-
-- ~~`--fix` reports stale pre-fix results.~~ Fixed in `src/pipeline.js`: the pipeline now
-  re-validates the fixed content before building the returned result.
-- ~~Duplicate `PHP_INTERPOLATION_UNCHECKED` findings.~~ Fixed in `src/php-fragment.js`:
-  `scanForEmbeddedPhp` now reports one occurrence per embedded PHP tag, not one per token.
-- ~~`--strict`'s human-readable output shows `✔ PASS` even when the exit code is `1`.~~
-  Fixed in `src/report.js`/`src/cli.js`: `formatHuman()` now takes the `--strict` flag into
-  account when deciding each file's printed PASS/FAIL status.
-- ~~`blockName` is inconsistently namespaced between `BLOCK_INVALID` and `STRUCTURAL_*`
-  findings.~~ Fixed in `src/structural.js`: block-runner's reports are always fully-namespaced,
-  while the structural layer's tokenizer parsed the bare delimiter text — see
-  `qualifyBlockName()` in `src/structural.js` for why and how findings are now made consistent.
-- ~~Multi-file JSON output order does not always match the order files were passed on the
-  command line.~~ Not a bug: `src/cli.js` already sorts resolved file paths
-  (`files.filter(...).sort()`) before processing, so `files[]` order is deterministic — it was
-  just undocumented, which is what made an argument-order comparison look like non-determinism.
-  The guarantee: **files are processed and reported in ascending lexicographic order of their
-  full resolved path (plain JS string `sort()` — UTF-16 code-unit order, not locale-aware, not
-  grouped by directory or basename), never command-line argument order.** Don't rely on
-  `files[]` matching the order patterns were passed on the command line.
-
-Remaining open issue:
+vulnerabilities, clean `npm install`); all correctness bugs found that day have since
+been fixed and are covered by regression tests in the automated vitest suite — see
+[`tests/README.md`](tests/README.md) for test coverage. One performance issue remains open:
 
 1. **Performance: ~10–11s of fixed start-up cost per run.**
    Booting `block-runner`'s dependency tree (`@wordpress/block-editor`,
@@ -259,6 +227,14 @@ Remaining open issue:
    "load a 350-package tree", approving it and re-measuring
    (`npm install-scripts approve block-runner`) is worth doing before assuming the
    ~10s is unavoidable.
+
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+## License
+
+[MIT](LICENSE)
 
 ## Roadmap
 
