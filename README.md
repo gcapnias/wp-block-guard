@@ -131,7 +131,7 @@ src/pipeline.js             per-file pipeline: Layer 0 -> Layer 1 -> Layer 2 -> 
 src/php-fragment.js         Layer 0: PHP header stripping + embedded-PHP flagging
 src/structural.js           Layer 1: dependency-free block-delimiter balance checker
 src/block-runner-adapter.js Layer 2: calls the installed block-runner library API in-process
-src/block-locator.js        re-derives each finding's line number from our own tokenizer
+src/block-locator.js        re-derives block-runner findings' line numbers using our tokenizer
                             (block-runner's own source.htmlLine can name the wrong block),
                             and resolves the verified `match` text for a leaf BLOCK_INVALID
 src/findings.js             finding-code registry (code, severity, message, fix)
