@@ -98,21 +98,47 @@ The `--` separator is required here so `npx` forwards `--help` to
 
 - `0` — all files passed (no error-severity findings; no warnings either, under `--strict`).
 - `1` — one or more error-severity findings (or warnings, under `--strict`).
-- `2` — usage error: no files matched, a file could not be read, or an unrecoverable internal failure.
+- `2` — usage error: no files matched, `--fix` and `--suggest` were combined, `--suggest` was used
+  without `--json`, an unknown option was passed, no file arguments were given, or an unrecoverable
+  internal failure occurred.
+
+A file that cannot be **read** is not a usage error: a read failure (bad permissions, deleted
+mid-run) is caught per-file and reported as a `BLOCK_RUNNER_FAILURE` finding, so it exits `1`
+like any other error. Match on that code to tell an environment problem apart from a content
+problem.
+
+### File matching
+
+Arguments are globs, resolved by `fast-glob`. Two behaviours worth knowing:
+
+- **Dot-prefixed files are not matched by wildcards.** A `*.html` pattern silently skips
+  `.hidden.html`, so a run can report success over fewer files than you expected. Name the
+  dotfile explicitly to include it.
+- **On Windows**, backslash patterns are converted for you, so `.\content\hero.html` matches.
+  This is a no-op on other platforms, where `\` is a legal glob character.
+
+Results are sorted by resolved path, so report order does not depend on argument order.
+Human-readable output is colorized only when stdout is a TTY, and is suppressed whenever
+`NO_COLOR` is set to any non-empty value (see [no-color.org](https://no-color.org)) — so piped
+and CI output is plain text by default.
 
 ## Architecture
 
 ```
-bin/wp-block-guard.js      CLI entry point
-src/cli.js                 argv parsing, glob expansion, orchestration, exit code
-src/pipeline.js            per-file pipeline: Layer 0 -> Layer 1 -> Layer 2 -> optional --fix
-src/php-fragment.js        Layer 0: PHP header stripping + embedded-PHP flagging
-src/structural.js          Layer 1: dependency-free block-delimiter balance checker
+bin/wp-block-guard.js       CLI entry point
+src/cli.js                  argv parsing, glob expansion, orchestration, exit code
+src/pipeline.js             per-file pipeline: Layer 0 -> Layer 1 -> Layer 2 -> optional --fix/--suggest
+src/php-fragment.js         Layer 0: PHP header stripping + embedded-PHP flagging
+src/structural.js           Layer 1: dependency-free block-delimiter balance checker
 src/block-runner-adapter.js Layer 2: calls the installed block-runner library API in-process
-src/findings.js            finding-code registry (code, severity, message, fix)
-src/report.js              aggregates per-file results, formats JSON/human output
-src/help.js                --help text (single source of truth, also feeds the finding-code table)
-src/index.js               library exports (validateFile, buildReport, formatHuman, ...)
+src/block-locator.js        re-derives each finding's line number from our own tokenizer
+                            (block-runner's own source.htmlLine can name the wrong block),
+                            and resolves the verified `match` text for a leaf BLOCK_INVALID
+src/findings.js             finding-code registry (code, severity, message, fix)
+src/report.js               aggregates per-file results, formats JSON/human output
+src/help.js                 --help text (single source of truth, also feeds the finding-code table)
+src/timing.js               boot-timing instrumentation behind `npm run measure:boot`
+src/index.js                library exports (validateFile, buildReport, formatHuman, ...)
 ```
 
 ### Layer 0 — PHP-fragment extraction and flagging (`src/php-fragment.js`)
@@ -190,6 +216,10 @@ a leaf `BLOCK_INVALID` finding whose correction has actually been re-validated t
 and `null` otherwise (including on every plain run). `search` and `match` together are an
 LSP-style `TextEdit` expressed as text — replace `search` with `match` for a surgical,
 pre-checked edit instead of applying the whole-file `suggestedOutput`.
+
+Two schema details a strict consumer should know: `line` and `blockName` are **omitted** (not
+`null`) when they don't apply, and the synthesized `BLOCK_RUNNER_FAILURE` finding omits `match`
+as well. Treat an absent key as equivalent to its null value.
 
 A couple of representative codes:
 

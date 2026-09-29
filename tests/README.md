@@ -333,7 +333,7 @@ output into the test assertion — do not guess expected findings.
 
 ## Coverage snapshot
 
-6 test files, 157 tests, all passing as of the last full run (up from 139 before
+7 test files, 161 tests, all passing as of the last full run (up from 139 before
 wpbg-zxg added `findTrailingPhpSection`/`maskTrailingPhp` unit tests and the
 trailing-PHP-section integration tests). No tests are skipped.
 

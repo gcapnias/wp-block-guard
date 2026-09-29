@@ -82,14 +82,47 @@ INPUT TYPES
           (an ordinary functions.php, say), which passes with that one
           warning instead of a false structural error.
 
+FILE MATCHING
+  Arguments are globs (fast-glob), not literal paths. Two things that
+  surprise people:
+
+  - Dot-prefixed files and directories are NOT matched by a wildcard. A
+    "*.html" pattern silently skips ".hidden.html", so a run can report
+    "ok": true over fewer files than you expected. Name a dotfile
+    explicitly to include it.
+  - On Windows, backslash patterns are converted for you, so
+    ".\\content\\hero.html" matches. This is a no-op on other platforms,
+    where "\" is a legal glob character.
+
+  Results are sorted by resolved path, so report order does not depend on
+  argument order.
+
+  Human-readable output is colorized only when stdout is a TTY, and is
+  suppressed whenever NO_COLOR is set to any non-empty value
+  (https://no-color.org). Piped or redirected output is therefore plain
+  text, which is what you get in CI by default.
+
 EXIT CODES
   0   All files passed (no error-severity findings; no warnings if --strict).
   1   One or more error-severity findings (or warnings, under --strict).
-  2   Usage error: no files matched, a file could not be read, --fix and
-      --suggest were combined, --suggest was used without --json, or an
-      unrecoverable internal failure occurred.
+  2   Usage error: no files matched, --fix and --suggest were combined,
+      --suggest was used without --json, an unknown option was passed, no
+      file arguments were given, or an unrecoverable internal failure
+      occurred.
+
+  Note that a file that cannot be READ is NOT exit 2. A read failure (bad
+  permissions, deleted mid-run, a directory where a file was expected) is
+  caught per-file and reported as a BLOCK_RUNNER_FAILURE finding, which is
+  an ordinary error-severity finding and therefore exits 1. It carries no
+  special field — match on the code if you need to tell an environment
+  problem apart from a content problem:
+
+    "code": "BLOCK_RUNNER_FAILURE",
+    "message": "Unexpected error while validating this file: <reason>"
 
 JSON OUTPUT SHAPE (--json)
+  On a normal run (0 or 1):
+
   {
     "ok": boolean,                     // true iff no error-severity findings anywhere
     "summary": { "files": n, "errors": n, "warnings": n, "fixed": n },
@@ -110,11 +143,12 @@ JSON OUTPUT SHAPE (--json)
             "code": "BLOCK_INVALID",       // stable machine-matchable code, see below
             "severity": "error" | "warning" | "info",
             "file": "path/to/file.html",
-            "line": 12,                    // 1-based, may be undefined
-            "blockName": "core/heading",   // present when the finding is block-scoped
+            "line": 12,                    // 1-based, omitted when not applicable
+            "blockName": "core/heading",   // omitted entirely (not null) when the
+                                           // finding is not scoped to a single block
             "message": "human-readable explanation of what is wrong",
             "search": "<h2>Hello</h2>",         // byte-exact source text at fault, or null
-            "match": "<h2 class=\"wp-block-heading\">Hello</h2>", // --suggest only, verified
+            "match": "<h2 class='wp-block-heading'>Hello</h2>", // --suggest only, verified
                                            // replacement for "search" (a leaf BLOCK_INVALID
                                            // whose correction re-validates clean); null
                                            // otherwise, including on every non-suggest run
@@ -124,6 +158,30 @@ JSON OUTPUT SHAPE (--json)
       }
     ]
   }
+
+  "ok" reflects ERROR-SEVERITY findings only, so it can disagree with the
+  exit code when --strict is in play: a file with warnings but no errors
+  reports "ok": true and still exits 1 under --strict. Branch on the exit
+  code if you need "no warnings either"; branch on "ok" if you only care
+  about errors.
+
+  On a no-match usage error (exit 2), the shape is DIFFERENT and carries no
+  "summary" and no "files":
+
+  {
+    "ok": false,
+    "error": "No matching .html or .php files found for: content/**/*.html",
+    "patterns": ["content/**/*.html"]
+  }
+
+  Check for the "error" key (or just "ok": false plus the absence of
+  "files") before iterating "files" — the documented shape above is not
+  emitted on this path, and doing report.files.forEach(...) on it throws.
+
+  A single file's findings always carry the same key set as shown above
+  EXCEPT the synthesized BLOCK_RUNNER_FAILURE finding, which omits "match"
+  entirely (a read failure has nothing to suggest). Treat a missing key as
+  equivalent to its null value.
 
 FINDING CODES (code — default severity)
 ${findingCodesTable()}
@@ -187,5 +245,8 @@ AGENT WORKFLOW (recommended loop)
      --fix would silently fold ~20 lines of unrelated reformatting into your
      change set with nothing to point at in review. Owning the write means you
      can explain it.
-  5. Only publish to WordPress once ok=true.
+  5. Only publish to WordPress once ok=true AND the exit code is 0. Under
+     --strict these are different conditions: "ok": true with exit 1 means
+     warnings are present, which is the stricter reading you asked for. With
+     --strict off (the default), exit 0 and ok=true do coincide.
 `;
