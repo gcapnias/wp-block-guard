@@ -111,7 +111,7 @@ EXIT CODES
       occurred.
 
   Note that a file that cannot be READ is NOT exit 2. A read failure (bad
-  permissions, deleted mid-run, a directory where a file was expected) is
+  permissions or deleted mid-run) is
   caught per-file and reported as a BLOCK_RUNNER_FAILURE finding, which is
   an ordinary error-severity finding and therefore exits 1. It carries no
   special field — match on the code if you need to tell an environment
