@@ -102,6 +102,9 @@ The `--` separator is required here so `npx` forwards `--help` to
   without `--json`, an unknown option was passed, no file arguments were given, or an unrecoverable
   internal failure occurred.
 
+Under `--strict`, `ok` still reflects error-severity findings only, so a warning-only report has
+`ok: true` while the process exits `1`. Gate strict workflows on both `ok` and the exit status.
+
 A file that cannot be **read** is not a usage error: a read failure (bad permissions, deleted
 mid-run) is caught per-file and reported as a `BLOCK_RUNNER_FAILURE` finding, so it exits `1`
 like any other error. Match on that code to tell an environment problem apart from a content
