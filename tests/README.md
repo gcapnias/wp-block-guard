@@ -236,7 +236,9 @@ tests/
 ├── structural.test.js    unit tests — Layer 1 (src/structural.js)
 ├── php-fragment.test.js  unit tests — Layer 0 (src/php-fragment.js)
 ├── pipeline.test.js      integration tests — validateFile() (src/pipeline.js)
+├── block-locator.test.js unit tests — block-runner finding-to-source mapping (src/block-locator.js)
 ├── cli.test.js           end-to-end tests — bin/wp-block-guard.js
+├── report.test.js        unit tests — human-readable report formatting (src/report.js)
 ├── timing.test.js        unit tests — the boot instrumentation (src/timing.js)
 └── fixtures/
     ├── wp-block-guard/   fixtures for this suite (see below)
@@ -284,6 +286,12 @@ machine rather than of the repo — a "CRLF fixture" silently becomes an LF one 
 clone, and an assertion resting on it would test nothing. See the `conformToSource` unit
 tests for the normalization rules in isolation.
 
+### `block-locator.test.js`
+
+Unit tests for resolving block-runner findings to source lines and spans, including ambiguous
+same-name blocks, fallback cases, and the `match` computation. Block-runner calls are stubbed
+so these tests do not require the jsdom + Gutenberg boot.
+
 ### `cli.test.js`
 
 Spawns `bin/wp-block-guard.js` via `child_process.spawnSync` end-to-end: clean exit 0,
@@ -291,6 +299,11 @@ Spawns `bin/wp-block-guard.js` via `child_process.spawnSync` end-to-end: clean e
 no-args usage error (exit 2, help to stderr), no-glob-match usage error (exit 2),
 `--version`, and multi-file JSON output ordering (alphabetical by full resolved path,
 independent of argument order).
+
+### `report.test.js`
+
+Unit tests for human-readable report formatting, covering color output and status/finding
+markers, error and warning counts, and the `search:` field's omission and display rules.
 
 ### `timing.test.js`
 
@@ -333,7 +346,7 @@ output into the test assertion — do not guess expected findings.
 
 ## Coverage snapshot
 
-6 test files, 157 tests, all passing as of the last full run (up from 139 before
+7 test files, 161 tests, all passing as of the last full run (up from 139 before
 wpbg-zxg added `findTrailingPhpSection`/`maskTrailingPhp` unit tests and the
 trailing-PHP-section integration tests). No tests are skipped.
 

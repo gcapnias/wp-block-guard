@@ -1,6 +1,6 @@
 {
   "name": "wp-block-guard",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Pre-publish validator for WordPress Gutenberg block markup (.html files, .php fragments) designed for AI coding agents. Wraps block-runner's headless-Gutenberg save()-diff check with a PHP-fragment flagging layer and a zero-dependency structural delimiter pre-check.",
   "type": "module",
   "bin": {
